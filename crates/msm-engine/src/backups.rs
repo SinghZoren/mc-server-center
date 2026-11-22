@@ -614,7 +614,7 @@ mod tests {
         let mut w = zip::ZipWriter::new(File::create(&bad).unwrap());
         for i in 0..z.len() {
             let mut e = z.by_index(i).unwrap();
-            let name = e.name().to_owned();
+            let name = e.name().unwrap().into_owned();
             let mut data = Vec::new();
             e.read_to_end(&mut data).unwrap();
             if name == "world/level.dat" {

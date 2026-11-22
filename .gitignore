@@ -35,3 +35,4 @@ desktop.ini
 # Local release output
 dist/
 portable/
+**/fuzz/Cargo.lock

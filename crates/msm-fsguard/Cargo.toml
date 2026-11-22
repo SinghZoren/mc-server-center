@@ -12,7 +12,7 @@ publish.workspace = true
 msm-core.workspace = true
 serde.workspace = true
 thiserror.workspace = true
-zip = { version = "4", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 flate2 = "1"
 tar = "0.4"
 

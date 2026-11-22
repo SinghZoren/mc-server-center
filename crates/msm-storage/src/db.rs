@@ -153,7 +153,11 @@ fn migrate(conn: &Connection, backup_dir: &Path, migrations: &[Migration]) -> Re
     let backup = if found > 0 {
         std::fs::create_dir_all(backup_dir)?;
         let dest = backup_dir.join(format!("state-v{found}-{}.db", now_ms()));
-        conn.backup(rusqlite::MAIN_DB, &dest, None)?;
+        conn.backup(
+            rusqlite::MAIN_DB,
+            &dest,
+            None::<fn(rusqlite::backup::Progress)>,
+        )?;
         Some(dest)
     } else {
         None

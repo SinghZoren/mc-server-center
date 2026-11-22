@@ -23,7 +23,7 @@ url = "2"
 sha2 = "0.10"
 fs4 = "0.13"
 igd-next = { version = "0.16", features = ["aio_tokio"] }
-zip = { version = "4", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate"] }
 toml = "0.9"
 thiserror.workspace = true
 

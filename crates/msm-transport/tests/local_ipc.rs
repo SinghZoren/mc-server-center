@@ -91,11 +91,16 @@ async fn socket_round_trip_and_single_daemon() {
         SocketListener::bind(&path).await.is_err(),
         "second daemon must not bind"
     );
+    // The refused second bind probes the socket with a connection of its own, which is still
+    // queued; serve connections until the real client's ping arrives.
     let server = tokio::spawn(async move {
-        let conn = listener.accept().await.unwrap();
-        let mut framed = FramedConn::new(conn, MAX_CONTROL_FRAME);
-        if let Some(Message::Ping { nonce }) = framed.recv().await.unwrap() {
-            framed.send(&Message::Pong { nonce }).await.unwrap();
+        loop {
+            let conn = listener.accept().await.unwrap();
+            let mut framed = FramedConn::new(conn, MAX_CONTROL_FRAME);
+            if let Ok(Some(Message::Ping { nonce })) = framed.recv().await {
+                framed.send(&Message::Pong { nonce }).await.unwrap();
+                break;
+            }
         }
     });
     let mut framed = FramedConn::new(connect(&path).await.unwrap(), MAX_CONTROL_FRAME);
