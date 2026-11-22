@@ -136,7 +136,14 @@ pub const COMMANDS: &[CommandSpec] = &[
     read("devices.list", C::Admin),
     write("devices.revoke", C::Admin),
     write("devices.rotate", C::View),
-    // DNS credentials are sensitive
+    // Domains (DNS-01..05). DNS credentials are sensitive.
+    read("domains.status", C::View),
+    read("domains.check", C::View),
+    read("domains.records", C::View),
+    read("domains.zones", C::Domains),
+    write("domains.link", C::Domains),
+    write("domains.unlink", C::Domains),
+    write("domains.clear_token", C::Domains),
     secret("domains.set_token", C::Domains),
 ];
 

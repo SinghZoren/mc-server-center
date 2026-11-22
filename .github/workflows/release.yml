@@ -9,6 +9,8 @@
 #   MCServerCenter-Setup-<version>-x64.exe           Windows installer (no admin rights needed)
 #   MCServerCenter-<version>-windows-x64-portable.zip  the same app, unzip-and-run
 #   MCServerCenter-<version>-linux-x86_64.tar.gz       headless Linux service + installer
+#   MCServerCenter-linux-x86_64.tar.gz + install-linux.sh  same, under stable names for
+#                                                      the one-command VPS installer
 #
 # The Windows files are not code-signed yet, so Windows SmartScreen will warn on first run.
 name: Release
@@ -139,6 +141,9 @@ jobs:
           cp LICENSE-MIT LICENSE-APACHE "$name/"
           chmod 0755 "$name/msmd" "$name/msmctl" "$name/install.sh"
           tar -czf "dist/$name.tar.gz" "$name"
+          # Stable names for the one-command installer (releases/latest/download/...).
+          cp "dist/$name.tar.gz" dist/MCServerCenter-linux-x86_64.tar.gz
+          cp packaging/linux/install-online.sh dist/install-linux.sh
           ls -l dist
       - uses: actions/upload-artifact@v4
         with:
@@ -173,7 +178,7 @@ jobs:
           |---|---|
           | Windows 10/11 | **MCServerCenter-Setup-…-x64.exe**: run it, then open *MC Server Center* from the Start menu |
           | Windows, no installer | **…-windows-x64-portable.zip**: unzip, run `MC Server Center.exe` |
-          | A Linux server | **…-linux-x86_64.tar.gz**: see `README.md` inside (`sudo ./install.sh`) |
+          | A Linux VPS or server | Run `curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install-linux.sh \| sudo sh` and enter the printed address and code in the app (or download **…-linux-x86_64.tar.gz** and run `sudo ./install.sh`) |
 
           These builds are not code-signed yet. Windows SmartScreen may say "Windows protected your PC":
           choose **More info -> Run anyway**. You can check the files against `SHA256SUMS`.

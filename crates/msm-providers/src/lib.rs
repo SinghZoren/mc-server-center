@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 pub mod adoptium;
+pub mod cloudflare;
 pub mod fabric;
 pub mod http;
 pub mod modrinth;

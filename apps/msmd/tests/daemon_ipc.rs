@@ -336,3 +336,34 @@ async fn shutdown_command_stops_the_service() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
+
+/// DNS-01..05 offline behaviour: unknown servers, no token yet, malformed tokens.
+#[tokio::test(flavor = "multi_thread")]
+async fn domains_commands_validate_before_any_network_call() {
+    let d = start_daemon();
+    let mut c = raw_connect(&d.endpoint).await;
+    c.send(&hello([1, 1])).await.unwrap();
+    let _ = c.recv().await.unwrap();
+    let missing = json!({"instance": "01ARZ3NDEKTSV4RRFFQ69G5FAV"});
+    assert_eq!(
+        code(&call(&mut c, "domains.status", missing.clone()).await),
+        Some(ErrorCode::NotFound)
+    );
+    assert_eq!(
+        code(&call(&mut c, "domains.zones", Value::Null).await),
+        Some(ErrorCode::NotFound)
+    );
+    assert_eq!(
+        code(
+            &call(
+                &mut c,
+                "domains.set_token",
+                json!({"token": "has spaces in it"})
+            )
+            .await
+        ),
+        Some(ErrorCode::InvalidArgument)
+    );
+    let r = call(&mut c, "domains.clear_token", Value::Null).await;
+    assert!(matches!(r, Outcome::Ok(_)));
+}

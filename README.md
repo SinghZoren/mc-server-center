@@ -112,8 +112,9 @@ them, even if you quit the app. The tray menu has **Stop all servers**.
 ## Feature tour
 
 ### Overview: how friends join
-The address for this PC, the address for friends on your Wi-Fi (with a Copy button), and a guided
-check for inviting friends over the internet ([details below](#letting-friends-join)). You can
+The address for this PC, the address for friends on your Wi-Fi (with a Copy button), a guided
+check for inviting friends over the internet, and an optional address on your own domain
+([details below](#letting-friends-join)). You can
 also rename a server, change its memory, or delete it. Deleted servers go to a recoverable trash
 folder.
 
@@ -216,6 +217,31 @@ that proves it, and offers a fix button where one exists. It recognises:
 
 Nothing on your PC or router is changed unless you click the button for it.
 
+### Use your own domain
+
+Instead of sharing a number like `203.0.113.5:25565`, give friends a name like
+`play.yourdomain.com`. On the server's **Overview**, open **Your own address → Use my domain…**:
+
+- **Your domain uses Cloudflare:** create an API token with the *Edit zone DNS* template, paste
+  it once, and type the address you want. The app then:
+  - creates the DNS records;
+  - **keeps them pointing at you** when your home internet address changes (it checks every
+    10 minutes);
+  - removes the records if you click **Remove**.
+
+  The token stays on the machine that runs the server.
+- **Any other provider** (GoDaddy, Namecheap, Porkbun, …): the app shows exactly which records to
+  add, with copy buttons.
+
+If the server isn't on Minecraft's default port 25565, an **SRV record** is added as well, so
+friends can still type just the name. **Check it works** looks the name up and tells you whether
+it points at this machine.
+
+![Linking a domain](docs/images/domain.webp)
+
+A domain gives your server a name; it doesn't open your network. If friends can't reach you by IP
+address, they can't reach you by name either: fix that first, or run the server on a VPS.
+
 ---
 
 ## Running servers on a Linux machine
@@ -223,9 +249,31 @@ Nothing on your PC or router is changed unless you click the button for it.
 You can run your servers on an always-on Linux box (a home server or a rented VPS) and manage it
 from the Windows app.
 
-### Install
+### Install with one command
 
-On the Linux machine (x86_64, systemd; tested target Ubuntu 24.04):
+On the Linux machine (x86_64 with systemd, for example Ubuntu 24.04 or Debian 12), run:
+
+```sh
+curl -fsSL https://github.com/SinghZoren/mc-server-center/releases/latest/download/install-linux.sh | sudo sh
+```
+
+The script:
+1. downloads the latest release and checks it against the release's `SHA256SUMS`;
+2. installs it as a service;
+3. turns on remote control on TCP 47625;
+4. prints the **address and a one-time pairing code**.
+
+In the app, click **Run servers on a VPS** (or **Managing → Add a VPS / remote server**) and
+enter them. That's it: the same screens now manage the VPS.
+
+If your VPS provider has a firewall or "security group", allow TCP 47625 and your Minecraft
+ports there too (for example 25565).
+
+![Adding a VPS](docs/images/vps.webp)
+
+### Install manually
+
+Download `MCServerCenter-<version>-linux-x86_64.tar.gz` from Releases, then:
 
 ```sh
 tar -xzf MCServerCenter-<version>-linux-x86_64.tar.gz
@@ -249,11 +297,10 @@ sudo ufw allow 47625/tcp                                        # if you use ufw
 sudo -u msm msmctl --data-dir /var/lib/msm pair-code "My PC"    # prints a one-time code
 ```
 
-In the app, open the **Managing** menu at the top left, choose **+ Add a remote server**, and
+In the app, open the **Managing** menu at the top left, choose **+ Add a VPS / remote server**, and
 enter `your-server-address:47625` and the code. From then on, every screen works on that machine.
 Switch back to **This PC** from the same menu.
 
-<img src="docs/images/add-remote.webp" alt="Add a remote server dialog" width="720">
 
 - The connection is encrypted (TLS 1.3).
 - Both sides pin each other's certificate, so a machine in between can't impersonate either one.
@@ -468,15 +515,15 @@ Working today:
 - **Java:** installed and managed automatically.
 - **Running servers:** console, players, quick commands and macros, settings.
 - **Content and data:** mods and plugins, backups and restore, crash diagnosis.
-- **Friends and remote access:** the connection helper, firewall/UPnP, remote Linux management
-  with pairing.
+- **Friends and remote access:** the connection helper, firewall/UPnP, your own domain
+  (Cloudflare automatic or any provider), and VPS / remote Linux management with a one-command
+  installer.
 - **Desktop:** tray icon, and servers that survive app and service restarts.
-- **Tests:** 174 automated tests.
+- **Tests:** 180+ automated tests.
 
 Not done yet:
 - **Server types:** Forge and NeoForge servers and modpacks.
 - **Friends behind CGNAT:** a self-hosted relay you run on your own VPS.
-- **Custom domains:** via Cloudflare DNS.
 - **Backups:** scheduled, automatic.
 - **Distribution:** code-signed builds and automatic updates.
 - **Secrets:** storage in Windows Credential Manager. Today they are files readable only by your

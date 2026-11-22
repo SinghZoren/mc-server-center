@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import type { InstanceState } from "../lib/api";
 import { stateLabel, stateTone } from "../lib/text";
@@ -88,13 +89,15 @@ export function Modal({
       opener?.focus();
     };
   }, [onClose]);
-  return (
+  // Rendered into <body> so cards with animations/transforms can't trap or cover it.
+  return createPortal(
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/60 p-6" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} role="dialog" aria-modal="true" aria-label={title} className="block-card rise w-full p-6" style={{ maxWidth: width }}>
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={title} className="block-card rise max-h-[90vh] w-full overflow-y-auto p-6" style={{ maxWidth: width }}>
         <h2 className="font-display mb-4 text-xl font-semibold">{title}</h2>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

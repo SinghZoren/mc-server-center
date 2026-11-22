@@ -134,7 +134,7 @@ export function BackupsTab({ inst }: { inst: Instance }) {
       ) : list.isError ? (
         <Notice tone="error">{errorText(list.error)}</Notice>
       ) : list.data.backups.length === 0 ? (
-        <p className="text-sm text-muted">No backups yet. Take one before trying new mods or big changes.</p>
+        <p className="text-sm text-muted">No backups yet. Take one before trying new mods, plugins or big changes.</p>
       ) : (
         <ul className="space-y-3">
           {list.data.backups.map((b, i) => (
@@ -175,7 +175,7 @@ export function BackupsTab({ inst }: { inst: Instance }) {
             <>
               <p>
                 The server's files will be replaced with the backup from <strong>{new Date(restoring.created_at_ms).toLocaleString()}</strong>
-                {restoring.scope === "world" ? " (worlds and settings only; mods and other files stay as they are)" : ""}.
+                {restoring.scope === "world" ? " (worlds and settings only; mods, plugins and other files stay as they are)" : ""}.
               </p>
               <p className="text-muted">Nothing is deleted: your current files are moved aside to a "before-restore" folder first.</p>
             </>

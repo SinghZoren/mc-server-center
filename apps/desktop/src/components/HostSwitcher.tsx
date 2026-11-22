@@ -4,6 +4,8 @@ import { hostsApi, type HostInfo } from "../lib/api";
 import { errorText } from "../lib/text";
 import { Modal, Notice, Spinner } from "./ui";
 
+const INSTALL_CMD = "curl -fsSL https://github.com/SinghZoren/mc-server-center/releases/latest/download/install-linux.sh | sudo sh";
+
 /** Choose which machine to manage: this PC or a paired remote server (REM-03). */
 export function HostSwitcher({ host, onChange }: { host: string; onChange: (id: string) => void }) {
   const qc = useQueryClient();
@@ -27,8 +29,13 @@ export function HostSwitcher({ host, onChange }: { host: string; onChange: (id: 
             {h.address ? ` (${h.address})` : ""}
           </option>
         ))}
-        <option value="__add">+ Add a remote server…</option>
+        <option value="__add">+ Add a VPS / remote server…</option>
       </select>
+      {list.length === 1 && (
+        <button className="mt-2 text-left text-xs text-muted underline-offset-2 hover:text-ink hover:underline" onClick={() => setAdding(true)}>
+          Run servers on a VPS, online 24/7 →
+        </button>
+      )}
       {adding && (
         <AddHost
           onClose={() => setAdding(false)}
@@ -50,16 +57,26 @@ function AddHost({ onClose, onAdded }: { onClose: () => void; onAdded: (id: stri
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
-    <Modal title="Add a remote server" onClose={onClose} width={560}>
+    <Modal title="Run servers on a VPS or another Linux machine" onClose={onClose} width={640}>
       <div className="space-y-4 text-sm">
-        <ol className="list-decimal space-y-1 pl-5 text-muted">
-          <li>Install MC Server Center on the Linux machine (see the Linux guide).</li>
-          <li>
-            On that machine run <code className="console text-xs text-ink">msmctl remote-on</code>, then{" "}
-            <code className="console text-xs text-ink">msmctl pair-code "My PC"</code>.
-          </li>
-          <li>Enter its address and the code below. Codes work once and expire after 10 minutes.</li>
-        </ol>
+        <p className="text-muted">
+          A VPS keeps your servers online 24/7 without your PC, and friends connect to it directly (no router setup). Any x86-64 Linux machine with
+          systemd works: a rented VPS (4 GB of memory or more is comfortable) or an old PC.
+        </p>
+        <div>
+          <p className="label">1. On the Linux machine, run</p>
+          <div className="flex items-start gap-2">
+            <code className="console block flex-1 bg-panel-2 px-3 py-2 text-[11px] break-all text-ink">{INSTALL_CMD}</code>
+            <button className="btn btn-ghost px-2 py-1 text-xs" onClick={() => void navigator.clipboard.writeText(INSTALL_CMD)}>
+              Copy
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-faint">
+            It installs MC Server Center as a service, turns on remote control, and prints an address and a pairing code. Also allow TCP 47625 and your
+            Minecraft ports (25565…) in the VPS provider's firewall if it has one.
+          </p>
+        </div>
+        <p className="label">2. Enter what it printed</p>
         <div>
           <label className="label" htmlFor="host-addr">Address and port</label>
           <input id="host-addr" className="field console text-xs" placeholder="203.0.113.5:47625" value={address} onChange={(e) => setAddress(e.target.value.trim())} />
@@ -70,7 +87,7 @@ function AddHost({ onClose, onAdded }: { onClose: () => void; onAdded: (id: stri
         </div>
         <div>
           <label className="label" htmlFor="host-name">Name (optional)</label>
-          <input id="host-name" className="field" maxLength={64} placeholder="Home server" value={name} onChange={(e) => setName(e.target.value)} />
+          <input id="host-name" className="field" maxLength={64} placeholder="My VPS" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <Notice>The connection is encrypted, and both sides check each other's identity. Nothing is sent to any other service.</Notice>
         {error && <Notice tone="error">{error}</Notice>}

@@ -13,6 +13,7 @@
 pub mod backups;
 pub mod content;
 pub mod diagnostics;
+pub mod domains;
 pub mod java;
 pub mod java_install;
 pub mod mrpack;

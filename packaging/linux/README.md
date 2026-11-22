@@ -22,7 +22,7 @@ sudo ufw allow 47625/tcp                                         # if you use uf
 sudo -u msm msmctl --data-dir /var/lib/msm pair-code "My PC"     # one-time code, 10 minutes
 ```
 
-In the desktop app, choose **Managing → Add a remote server**, enter `your-host:47625` and the
+In the desktop app, choose **Managing → Add a VPS / remote server**, enter `your-host:47625` and the
 code.
 
 - The connection is TLS 1.3. Both sides pin each other's certificate.

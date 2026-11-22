@@ -83,6 +83,7 @@ async fn serve(data: DataDir, custom_dir: bool) -> Result<(), String> {
         env!("CARGO_PKG_VERSION"),
         data.root().display()
     );
+    daemon.spawn_dns_updater();
     if let Some((bind, port)) = daemon.remote_listen_setting() {
         match remote_server::start(daemon.clone(), bind, port).await {
             Ok(fp) => eprintln!(

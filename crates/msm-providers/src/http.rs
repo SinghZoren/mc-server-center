@@ -307,6 +307,69 @@ impl Downloader {
         }
     }
 
+    /// A JSON API call (any method, optional bearer token and JSON body) under the same egress
+    /// policy. Returns the status and body for every HTTP status, because APIs such as
+    /// Cloudflare's explain errors in the body. Only network errors, 429 and 5xx are retried.
+    /// The token is sent only as an `Authorization` header and never logged.
+    ///
+    /// # Errors
+    /// Policy, size or network errors.
+    #[allow(clippy::too_many_arguments)] // mirrors the parts of one HTTP request
+    pub async fn api_call(
+        &self,
+        method: reqwest::Method,
+        url: &Url,
+        policy: &HostPolicy,
+        bearer: Option<&str>,
+        body: Option<&serde_json::Value>,
+        accept: &str,
+        max_bytes: u64,
+    ) -> Result<(u16, Vec<u8>), DownloadError> {
+        policy.check(url)?;
+        let client = build_client(policy.clone());
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let mut req = client
+                .request(method.clone(), url.clone())
+                .header(header::ACCEPT, accept);
+            if let Some(t) = bearer {
+                req = req.bearer_auth(t);
+            }
+            if let Some(b) = body {
+                req = req.json(b);
+            }
+            match req.send().await {
+                Ok(resp) => {
+                    policy.check(resp.url())?;
+                    let status = resp.status();
+                    if (status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error())
+                        && attempt < MAX_ATTEMPTS
+                    {
+                        let wait = if status == StatusCode::TOO_MANY_REQUESTS {
+                            retry_after(&resp)
+                        } else {
+                            backoff(attempt)
+                        };
+                        tokio::time::sleep(wait).await;
+                        continue;
+                    }
+                    if status.is_redirection() {
+                        return Err(DownloadError::HostNotAllowed(format!(
+                            "{url}: unexpected redirect"
+                        )));
+                    }
+                    let bytes = read_capped(resp, max_bytes).await?;
+                    return Ok((status.as_u16(), bytes));
+                }
+                Err(e) if attempt < MAX_ATTEMPTS && !e.is_redirect() => {
+                    tokio::time::sleep(backoff(attempt)).await
+                }
+                Err(e) => return Err(DownloadError::Network(e.to_string())),
+            }
+        }
+    }
+
     /// Fetches `spec` into the cache, verifying integrity. Returns immediately if a blob with
     /// the expected SHA-256 is already cached.
     ///

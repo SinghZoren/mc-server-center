@@ -11,6 +11,7 @@ import { BackupsTab } from "./BackupsTab";
 import { SettingsTab } from "./SettingsTab";
 import { ContentTab } from "./ContentTab";
 import { ConnectWizard } from "./ConnectWizard";
+import { DomainCard } from "./DomainCard";
 
 const TABS = ["Overview", "Console", "Players", "Quick commands", "Mods", "Settings", "Backups"] as const;
 type Tab = (typeof TABS)[number];
@@ -331,6 +332,7 @@ function Overview({ inst }: { inst: Instance }) {
         ))}
       </dl>
       <ConnectWizard inst={inst} />
+      <DomainCard inst={inst} />
       <ManageCard inst={inst} />
     </div>
   );

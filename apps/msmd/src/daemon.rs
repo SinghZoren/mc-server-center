@@ -1365,10 +1365,375 @@ impl Daemon {
                 self.remote.disconnect(device);
                 Ok(json!({"revoked": device}))
             }
+            c if c.starts_with("domains.") => self.domains(c, p).await,
             other => Err(err(
                 ErrorCode::NotImplemented,
                 format!("{other} is not implemented yet"),
             )),
+        }
+    }
+
+    // ---- Domains (DNS-01..05) ----------------------------------------------------------
+
+    fn cloudflare_token_path(&self) -> PathBuf {
+        self.data.secrets().join("cloudflare.json")
+    }
+
+    fn cloudflare(&self) -> Option<msm_providers::cloudflare::Cloudflare> {
+        let text = std::fs::read_to_string(self.cloudflare_token_path()).ok()?;
+        let v: Value = serde_json::from_str(&text).ok()?;
+        let token = v["token"].as_str()?.to_owned();
+        Some(msm_providers::cloudflare::Cloudflare::new(
+            self.downloader.clone(),
+            token,
+        ))
+    }
+
+    fn dns_links(&self) -> serde_json::Map<String, Value> {
+        self.db
+            .lock()
+            .ok()
+            .and_then(|db| {
+                msm_storage::repo::get_setting(&db, "dns_links")
+                    .ok()
+                    .flatten()
+            })
+            .and_then(|v| v.as_object().cloned())
+            .unwrap_or_default()
+    }
+
+    fn save_dns_links(&self, links: serde_json::Map<String, Value>) -> Result<(), ApiError> {
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| err(ErrorCode::Internal, "db lock"))?;
+        msm_storage::repo::set_setting(&db, "dns_links", &Value::Object(links))
+            .map_err(|e| err(ErrorCode::Internal, e.to_string()))
+    }
+
+    async fn public_ip_or_err(&self) -> Result<std::net::Ipv4Addr, ApiError> {
+        msm_engine::network::public_ipv4(&self.downloader).await.ip.ok_or_else(|| {
+            err(
+                ErrorCode::UpstreamError,
+                "this machine's public internet address couldn't be found; check the internet connection and try again",
+            )
+        })
+    }
+
+    fn cf_err(e: msm_providers::cloudflare::CloudflareError) -> ApiError {
+        use msm_providers::cloudflare::CloudflareError as E;
+        match e {
+            E::Auth(m) => err(
+                ErrorCode::Forbidden,
+                format!(
+                    "Cloudflare refused the token ({m}). Create a token with \"Edit zone DNS\" permission for your domain."
+                ),
+            ),
+            E::Api(m) => err(ErrorCode::UpstreamError, format!("Cloudflare: {m}")),
+            E::Http(h) => err(ErrorCode::UpstreamError, h.to_string()),
+        }
+    }
+
+    /// Creates/updates the Cloudflare records for a link and returns the updated link.
+    async fn apply_cloudflare_link(
+        &self,
+        cf: &msm_providers::cloudflare::Cloudflare,
+        mut link: Value,
+        ip: std::net::Ipv4Addr,
+        port: u16,
+    ) -> Result<Value, ApiError> {
+        use msm_providers::cloudflare::{a_record, srv_record};
+        let host = link["hostname"].as_str().unwrap_or_default().to_owned();
+        let zone = link["zone_id"].as_str().unwrap_or_default().to_owned();
+        let a_id = cf
+            .upsert(&zone, &a_record(&host, ip))
+            .await
+            .map_err(Self::cf_err)?;
+        link["a_id"] = json!(a_id);
+        if port == msm_engine::domains::DEFAULT_PORT {
+            if let Some(old) = link["srv_id"].as_str().map(str::to_owned) {
+                cf.delete(&zone, &old).await.map_err(Self::cf_err)?;
+            }
+            link["srv_id"] = Value::Null;
+        } else {
+            let srv_id = cf
+                .upsert(&zone, &srv_record(&host, port))
+                .await
+                .map_err(Self::cf_err)?;
+            link["srv_id"] = json!(srv_id);
+        }
+        link["port"] = json!(port);
+        link["last_ip"] = json!(ip.to_string());
+        link["updated_at"] = json!(now_ms());
+        link["last_error"] = Value::Null;
+        Ok(link)
+    }
+
+    async fn domains(self: &Arc<Self>, cmd: &str, p: &Value) -> Res {
+        use msm_engine::domains;
+        match cmd {
+            "domains.status" => {
+                let InstanceRef { instance } = params(p)?;
+                let inst = self.instance(instance).await?;
+                let link = self.dns_links().get(&instance.to_string()).cloned();
+                let share = link
+                    .as_ref()
+                    .and_then(|l| l["hostname"].as_str())
+                    .map(|h| domains::share_address(h, inst.manifest.port));
+                Ok(json!({
+                    "cloudflare_connected": self.cloudflare_token_path().is_file(),
+                    "link": link,
+                    "share_address": share,
+                }))
+            }
+            "domains.set_token" => {
+                #[derive(Deserialize)]
+                struct P {
+                    token: String,
+                }
+                let P { token } = params(p)?;
+                let token = token.trim().to_owned();
+                if token.is_empty() || token.len() > 256 || token.chars().any(char::is_whitespace) {
+                    return Err(err(
+                        ErrorCode::InvalidArgument,
+                        "that doesn't look like a Cloudflare API token",
+                    ));
+                }
+                let cf = msm_providers::cloudflare::Cloudflare::new(
+                    self.downloader.clone(),
+                    token.clone(),
+                );
+                cf.verify().await.map_err(Self::cf_err)?;
+                let zones = cf.zones().await.map_err(Self::cf_err)?;
+                let path = self.cloudflare_token_path();
+                msm_fsguard::write_atomic(&path, json!({ "token": token }).to_string().as_bytes())
+                    .map_err(|e| err(ErrorCode::Internal, e.to_string()))?;
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+                }
+                Ok(json!({ "zones": zones }))
+            }
+            "domains.clear_token" => {
+                let _ = std::fs::remove_file(self.cloudflare_token_path());
+                Ok(json!({ "cleared": true }))
+            }
+            "domains.zones" => {
+                let cf = self
+                    .cloudflare()
+                    .ok_or_else(|| err(ErrorCode::NotFound, "Cloudflare isn't connected"))?;
+                Ok(json!({ "zones": cf.zones().await.map_err(Self::cf_err)? }))
+            }
+            "domains.link" => {
+                #[derive(Deserialize)]
+                struct P {
+                    instance: InstanceId,
+                    hostname: String,
+                    provider: String,
+                }
+                let P {
+                    instance,
+                    hostname,
+                    provider,
+                } = params(p)?;
+                let inst = self.instance(instance).await?;
+                let host = domains::normalize_hostname(&hostname)
+                    .map_err(|e| err(ErrorCode::InvalidArgument, e))?;
+                let port = inst.manifest.port;
+                let ip = self.public_ip_or_err().await?;
+                let mut links = self.dns_links();
+                if links.iter().any(|(k, v)| {
+                    *k != instance.to_string() && v["hostname"].as_str() == Some(host.as_str())
+                }) {
+                    return Err(err(
+                        ErrorCode::InvalidArgument,
+                        format!("{host} is already linked to another server"),
+                    ));
+                }
+                let link = match provider.as_str() {
+                    "cloudflare" => {
+                        let cf = self.cloudflare().ok_or_else(|| {
+                            err(ErrorCode::InvalidArgument, "connect Cloudflare first")
+                        })?;
+                        let zones = cf.zones().await.map_err(Self::cf_err)?;
+                        let names: Vec<String> = zones.iter().map(|z| z.name.clone()).collect();
+                        let zone_name = domains::zone_for(&host, &names).cloned().ok_or_else(|| {
+                            err(
+                                ErrorCode::InvalidArgument,
+                                format!("{host} isn't in a domain this Cloudflare token can edit ({})", names.join(", ")),
+                            )
+                        })?;
+                        let zone = zones
+                            .iter()
+                            .find(|z| z.name == zone_name)
+                            .map(|z| z.id.clone())
+                            .unwrap_or_default();
+                        // Keep the SRV record ID we made before for this name, so changes replace it.
+                        let previous = links
+                            .get(&instance.to_string())
+                            .cloned()
+                            .unwrap_or(Value::Null);
+                        let srv_id = if previous["hostname"].as_str() == Some(host.as_str()) {
+                            previous["srv_id"].clone()
+                        } else {
+                            Value::Null
+                        };
+                        let base = json!({
+                            "hostname": host, "provider": "cloudflare", "zone_id": zone,
+                            "zone_name": zone_name, "srv_id": srv_id,
+                        });
+                        self.apply_cloudflare_link(&cf, base, ip, port).await?
+                    }
+                    "manual" => json!({
+                        "hostname": host, "provider": "manual", "port": port,
+                        "last_ip": ip.to_string(), "updated_at": now_ms(),
+                    }),
+                    _ => {
+                        return Err(err(
+                            ErrorCode::InvalidArgument,
+                            "provider must be cloudflare or manual",
+                        ));
+                    }
+                };
+                links.insert(instance.to_string(), link.clone());
+                self.save_dns_links(links)?;
+                Ok(json!({
+                    "link": link,
+                    "records": domains::planned_records(&host, ip, port),
+                    "share_address": domains::share_address(&host, port),
+                }))
+            }
+            "domains.records" => {
+                let InstanceRef { instance } = params(p)?;
+                let inst = self.instance(instance).await?;
+                let link = self
+                    .dns_links()
+                    .get(&instance.to_string())
+                    .cloned()
+                    .ok_or_else(|| {
+                        err(ErrorCode::NotFound, "no domain is linked to this server")
+                    })?;
+                let ip = self.public_ip_or_err().await?;
+                let host = link["hostname"].as_str().unwrap_or_default();
+                Ok(json!({ "records": domains::planned_records(host, ip, inst.manifest.port) }))
+            }
+            "domains.unlink" => {
+                let InstanceRef { instance } = params(p)?;
+                let mut links = self.dns_links();
+                let Some(link) = links.remove(&instance.to_string()) else {
+                    return Ok(json!({ "unlinked": false }));
+                };
+                if link["provider"].as_str() == Some("cloudflare")
+                    && let Some(cf) = self.cloudflare()
+                {
+                    let zone = link["zone_id"].as_str().unwrap_or_default();
+                    for key in ["a_id", "srv_id"] {
+                        if let Some(id) = link[key].as_str() {
+                            cf.delete(zone, id).await.map_err(Self::cf_err)?;
+                        }
+                    }
+                }
+                self.save_dns_links(links)?;
+                Ok(json!({ "unlinked": true }))
+            }
+            "domains.check" => {
+                let InstanceRef { instance } = params(p)?;
+                let inst = self.instance(instance).await?;
+                let link = self
+                    .dns_links()
+                    .get(&instance.to_string())
+                    .cloned()
+                    .ok_or_else(|| {
+                        err(ErrorCode::NotFound, "no domain is linked to this server")
+                    })?;
+                let host = link["hostname"].as_str().unwrap_or_default().to_owned();
+                let srv_name = format!("_minecraft._tcp.{host}");
+                let (public, a, srv) = tokio::join!(
+                    msm_engine::network::public_ipv4(&self.downloader),
+                    msm_providers::cloudflare::lookup(&self.downloader, &host, "A"),
+                    msm_providers::cloudflare::lookup(&self.downloader, &srv_name, "SRV"),
+                );
+                let a = a.map_err(|e| {
+                    err(ErrorCode::UpstreamError, format!("DNS lookup failed: {e}"))
+                })?;
+                Ok(json!(domains::check(
+                    &host,
+                    public.ip,
+                    a,
+                    &srv.unwrap_or_default(),
+                    inst.manifest.port
+                )))
+            }
+            other => Err(err(
+                ErrorCode::NotImplemented,
+                format!("{other} is not implemented yet"),
+            )),
+        }
+    }
+
+    /// Keeps Cloudflare-linked domains pointing at this machine when its public IP changes
+    /// (home connections often get a new address now and then). Runs every 10 minutes.
+    pub fn spawn_dns_updater(self: &Arc<Self>) {
+        let me = Arc::clone(self);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            loop {
+                me.refresh_dns_links().await;
+                tokio::time::sleep(Duration::from_secs(600)).await;
+            }
+        });
+    }
+
+    async fn refresh_dns_links(self: &Arc<Self>) {
+        let links = self.dns_links();
+        if !links
+            .values()
+            .any(|l| l["provider"].as_str() == Some("cloudflare"))
+        {
+            return;
+        }
+        let Some(cf) = self.cloudflare() else { return };
+        let Some(ip) = msm_engine::network::public_ipv4(&self.downloader).await.ip else {
+            return;
+        };
+        let mut changed = false;
+        let mut updated = links.clone();
+        for (id, link) in &links {
+            if link["provider"].as_str() != Some("cloudflare") {
+                continue;
+            }
+            let Ok(instance) = id.parse::<InstanceId>() else {
+                continue;
+            };
+            let Ok(inst) = self.instance(instance).await else {
+                continue;
+            };
+            let port = inst.manifest.port;
+            if link["last_ip"].as_str() == Some(ip.to_string().as_str())
+                && link["port"].as_u64() == Some(u64::from(port))
+            {
+                continue;
+            }
+            let new = match self
+                .apply_cloudflare_link(&cf, link.clone(), ip, port)
+                .await
+            {
+                Ok(l) => {
+                    self.audit_remote("system", "domains.auto_update", true);
+                    l
+                }
+                Err(e) => {
+                    let mut l = link.clone();
+                    l["last_error"] = json!(e.detail);
+                    l
+                }
+            };
+            updated.insert(id.clone(), new);
+            changed = true;
+        }
+        if changed {
+            let _ = self.save_dns_links(updated);
         }
     }
 
