@@ -18,6 +18,8 @@ msm-providers = { path = "../../crates/msm-providers" }
 msm-engine = { path = "../../crates/msm-engine" }
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
+hex = "0.4"
+rand = "0.8"
 serde.workspace = true
 serde_json.workspace = true
 toml = "0.9"

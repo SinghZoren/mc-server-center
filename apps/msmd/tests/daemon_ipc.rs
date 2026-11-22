@@ -367,3 +367,100 @@ async fn domains_commands_validate_before_any_network_call() {
     let r = call(&mut c, "domains.clear_token", Value::Null).await;
     assert!(matches!(r, Outcome::Ok(_)));
 }
+
+/// TUN-01: a home daemon pairs with a VPS daemon (relay-only rights) and keeps a control
+/// connection; only paired devices can open relay ports.
+#[tokio::test(flavor = "multi_thread")]
+async fn relay_pairing_and_control_connection() {
+    let vps = start_daemon();
+    let home = start_daemon();
+    let mut v = raw_connect(&vps.endpoint).await;
+    v.send(&hello([1, 1])).await.unwrap();
+    let _ = v.recv().await.unwrap();
+    let mut h = raw_connect(&home.endpoint).await;
+    h.send(&hello([1, 1])).await.unwrap();
+    let _ = h.recv().await.unwrap();
+
+    // The VPS must have remote access on to hand out relay codes.
+    assert_eq!(
+        code(&call(&mut v, "relay.create_code", json!({})).await),
+        Some(ErrorCode::InvalidArgument)
+    );
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    assert!(matches!(
+        call(
+            &mut v,
+            "remote.enable",
+            json!({"port": port, "bind": "127.0.0.1"})
+        )
+        .await,
+        Outcome::Ok(_)
+    ));
+    let Outcome::Ok(grant) = call(&mut v, "relay.create_code", json!({"name": "home"})).await
+    else {
+        panic!()
+    };
+
+    // A local client isn't a paired device, so it can't open relay ports.
+    assert_eq!(
+        code(&call(&mut v, "relay.open", json!({"port": 30000})).await),
+        Some(ErrorCode::InvalidArgument)
+    );
+
+    // Wrong code is refused; the right one pairs and the control connection comes up.
+    let bad = json!({"address": format!("127.0.0.1:{port}"), "fingerprint": grant["fingerprint"], "code": "AAAAA-BBBBB-CCCCC-DDDDD"});
+    assert_eq!(
+        code(&call(&mut h, "relay.setup", bad).await),
+        Some(ErrorCode::Unauthenticated)
+    );
+    let good = json!({"address": format!("127.0.0.1:{port}"), "fingerprint": grant["fingerprint"], "code": grant["code"]});
+    assert!(matches!(
+        call(&mut h, "relay.setup", good).await,
+        Outcome::Ok(_)
+    ));
+    let mut connected = false;
+    for _ in 0..50 {
+        if let Outcome::Ok(s) = call(&mut h, "relay.status", Value::Null).await
+            && s["connected"] == true
+        {
+            connected = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(connected, "home did not connect to the relay");
+
+    // The paired relay device has only relay rights.
+    let Outcome::Ok(devices) = call(&mut v, "devices.list", Value::Null).await else {
+        panic!()
+    };
+    let dev = devices
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["revoked"] == false)
+        .unwrap()
+        .clone();
+    assert_eq!(dev["scopes"], json!(["relay"]));
+
+    // Removing it on the VPS drops the home side's connection.
+    assert!(matches!(
+        call(&mut v, "devices.revoke", json!({"device": dev["id"]})).await,
+        Outcome::Ok(_)
+    ));
+    let mut dropped = false;
+    for _ in 0..50 {
+        if let Outcome::Ok(s) = call(&mut h, "relay.status", Value::Null).await
+            && s["connected"] == false
+        {
+            dropped = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(dropped, "revocation did not disconnect the relay client");
+}

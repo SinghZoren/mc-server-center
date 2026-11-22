@@ -203,7 +203,8 @@ async fn start_inner(
                 let v = m.entry(peer.ip()).or_default();
                 v.retain(|t| now.duration_since(*t) < Duration::from_secs(60));
                 v.push(now);
-                v.len() <= 30
+                // Relayed players each open one connection from the home server's address.
+                v.len() <= 240
             });
             if !matches!(allowed, Ok(true)) {
                 continue;

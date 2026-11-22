@@ -93,6 +93,12 @@ impl FrameDecoder {
         Ok(Some(msg?))
     }
 
+    /// Takes the bytes buffered but not yet decoded.
+    #[must_use]
+    pub fn into_buffer(self) -> Vec<u8> {
+        self.buf
+    }
+
     /// Bytes buffered but not yet decoded.
     #[must_use]
     pub fn buffered(&self) -> usize {

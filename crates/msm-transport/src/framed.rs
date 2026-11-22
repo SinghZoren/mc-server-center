@@ -74,4 +74,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> FramedConn<S> {
     pub fn into_inner(self) -> S {
         self.io
     }
+
+    /// Returns the underlying stream and any bytes already read but not yet decoded (for
+    /// switching a connection to raw bytes after a message exchange).
+    pub fn into_parts(self) -> (S, Vec<u8>) {
+        (self.io, self.decoder.into_buffer())
+    }
 }

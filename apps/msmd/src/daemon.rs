@@ -103,6 +103,8 @@ pub struct Daemon {
     remote: crate::remote_server::RemoteState,
     /// Signalled by `system.shutdown`.
     shutdown: tokio::sync::Notify,
+    relay_hub: crate::relay::RelayHub,
+    relay_client: crate::relay::RelayClient,
 }
 
 type Res = Result<Value, ApiError>;
@@ -144,6 +146,8 @@ impl Daemon {
             tasks: Mutex::new(HashMap::new()),
             remote: crate::remote_server::RemoteState::default(),
             shutdown: tokio::sync::Notify::new(),
+            relay_hub: crate::relay::RelayHub::default(),
+            relay_client: crate::relay::RelayClient::default(),
         });
         daemon.load_instances().await?;
         Ok(daemon)
@@ -1363,9 +1367,240 @@ impl Daemon {
                     return Err(err(ErrorCode::NotFound, "no such active device"));
                 }
                 self.remote.disconnect(device);
+                self.relay_hub.close_device(device);
                 Ok(json!({"revoked": device}))
             }
             c if c.starts_with("domains.") => self.domains(c, p).await,
+            c if c.starts_with("relay.") => self.relay(principal, c, p).await,
+            other => Err(err(
+                ErrorCode::NotImplemented,
+                format!("{other} is not implemented yet"),
+            )),
+        }
+    }
+
+    // ---- Relay (TUN-01) ------------------------------------------------------------------
+
+    /// The relay hub (VPS side).
+    pub fn relay_hub(&self) -> &crate::relay::RelayHub {
+        &self.relay_hub
+    }
+
+    /// The relay client (home side).
+    pub fn relay_client(&self) -> &crate::relay::RelayClient {
+        &self.relay_client
+    }
+
+    /// A stored setting.
+    pub fn setting(&self, key: &str) -> Option<Value> {
+        let db = self.db.lock().ok()?;
+        msm_storage::repo::get_setting(&db, key)
+            .ok()
+            .flatten()
+            .filter(|v| !v.is_null())
+    }
+
+    /// Stores a setting.
+    ///
+    /// # Errors
+    /// Storage errors.
+    pub fn put_setting(&self, key: &str, value: &Value) -> Result<(), ApiError> {
+        let db = self
+            .db
+            .lock()
+            .map_err(|_| err(ErrorCode::Internal, "db lock"))?;
+        msm_storage::repo::set_setting(&db, key, value)
+            .map_err(|e| err(ErrorCode::Internal, e.to_string()))
+    }
+
+    /// Ports used by servers on this machine.
+    pub async fn local_instance_ports(&self) -> Vec<u16> {
+        self.instances
+            .read()
+            .await
+            .values()
+            .map(|i| i.manifest.port)
+            .collect()
+    }
+
+    /// A server's port, if it exists.
+    pub async fn instance_port(&self, id: InstanceId) -> Option<u16> {
+        self.instances
+            .read()
+            .await
+            .get(&id)
+            .map(|i| i.manifest.port)
+    }
+
+    /// A server's name, if it exists.
+    pub async fn instance_name(&self, id: InstanceId) -> Option<String> {
+        self.instances
+            .read()
+            .await
+            .get(&id)
+            .map(|i| i.manifest.name.clone())
+    }
+
+    fn relay_status_json(&self) -> Value {
+        let Some(cfg) = crate::relay::load_config(self) else {
+            return json!({ "configured": false });
+        };
+        let st = self.relay_client.status();
+        let ports: Vec<Value> = cfg
+            .ports
+            .iter()
+            .map(|(instance, port)| {
+                json!({
+                    "instance": instance,
+                    "port": port,
+                    "share_address": cfg.share_address(*port),
+                    "open": st.ports.get(port).is_some_and(Option::is_none),
+                    "error": st.ports.get(port).cloned().flatten(),
+                })
+            })
+            .collect();
+        json!({
+            "configured": true,
+            "address": cfg.address,
+            "host": cfg.host(),
+            "connected": st.connected,
+            "last_error": st.last_error,
+            "ports": ports,
+            "active_connections": self.relay_client.active(),
+        })
+    }
+
+    async fn relay(self: &Arc<Self>, principal: &Principal, cmd: &str, p: &Value) -> Res {
+        use crate::relay::{ClientConfig, RelayClient, RelayHub, load_config, save_config};
+        #[derive(Deserialize)]
+        struct PortP {
+            port: u16,
+            #[serde(default)]
+            label: String,
+        }
+        match cmd {
+            // ---- on the VPS ----
+            "relay.create_code" => {
+                if !self.remote.is_listening() {
+                    return Err(err(
+                        ErrorCode::InvalidArgument,
+                        "remote access is off on this machine",
+                    ));
+                }
+                let name = p["name"]
+                    .as_str()
+                    .unwrap_or("Home server")
+                    .chars()
+                    .take(48)
+                    .collect::<String>();
+                let code = self
+                    .remote
+                    .issue_code(format!("Relay: {name}"), vec![msm_api::Capability::Relay]);
+                let identity = crate::remote_server::load_identity(self)
+                    .map_err(|e| err(ErrorCode::Internal, e))?;
+                Ok(
+                    json!({ "code": code, "fingerprint": identity.fingerprint(), "port": self.remote_port_setting() }),
+                )
+            }
+            "relay.open" => {
+                let Principal::Device { id, .. } = principal else {
+                    return Err(err(
+                        ErrorCode::InvalidArgument,
+                        "only a paired home server can open relay ports",
+                    ));
+                };
+                let PortP { port, label } = params(p)?;
+                RelayHub::open(self, *id, port, label).await
+            }
+            "relay.close" => {
+                let Principal::Device { id, .. } = principal else {
+                    return Err(err(
+                        ErrorCode::InvalidArgument,
+                        "only a paired home server can close relay ports",
+                    ));
+                };
+                let PortP { port, .. } = params(p)?;
+                Ok(json!({ "closed": self.relay_hub.close(*id, port) }))
+            }
+            "relay.hosted" => Ok(self.relay_hub.list()),
+
+            // ---- at home ----
+            "relay.status" => Ok(self.relay_status_json()),
+            "relay.setup" => {
+                #[derive(Deserialize)]
+                struct P {
+                    address: String,
+                    fingerprint: String,
+                    code: String,
+                }
+                let P {
+                    address,
+                    fingerprint,
+                    code,
+                } = params(p)?;
+                let address = address.trim().to_owned();
+                if !address.contains(':')
+                    || address.chars().any(char::is_whitespace)
+                    || address.len() > 255
+                {
+                    return Err(err(
+                        ErrorCode::InvalidArgument,
+                        "the relay address must look like host:port",
+                    ));
+                }
+                let device = crate::relay::pair(self, &address, &fingerprint, &code).await?;
+                let ports = load_config(self).map(|c| c.ports).unwrap_or_default();
+                save_config(
+                    self,
+                    Some(&ClientConfig {
+                        address,
+                        fingerprint,
+                        device,
+                        ports,
+                    }),
+                )?;
+                RelayClient::restart(self);
+                Ok(self.relay_status_json())
+            }
+            "relay.expose" | "relay.unexpose" => {
+                #[derive(Deserialize)]
+                struct P {
+                    instance: InstanceId,
+                    port: Option<u16>,
+                }
+                let P { instance, port } = params(p)?;
+                let inst = self.instance(instance).await?;
+                let mut cfg = load_config(self)
+                    .ok_or_else(|| err(ErrorCode::InvalidArgument, "set up the relay first"))?;
+                if cmd == "relay.expose" {
+                    let port = port.unwrap_or(inst.manifest.port);
+                    if port < 1024 {
+                        return Err(err(
+                            ErrorCode::InvalidArgument,
+                            "relay ports must be 1024 or higher",
+                        ));
+                    }
+                    if cfg.ports.iter().any(|(i, p)| *i != instance && *p == port) {
+                        return Err(err(
+                            ErrorCode::InvalidArgument,
+                            format!("port {port} is already used by another relayed server"),
+                        ));
+                    }
+                    cfg.ports.insert(instance, port);
+                } else {
+                    cfg.ports.remove(&instance);
+                }
+                save_config(self, Some(&cfg))?;
+                RelayClient::restart(self);
+                // Give the control connection a moment so the answer can include the result.
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+                Ok(self.relay_status_json())
+            }
+            "relay.remove" => {
+                save_config(self, None)?;
+                RelayClient::restart(self);
+                Ok(json!({ "configured": false }))
+            }
             other => Err(err(
                 ErrorCode::NotImplemented,
                 format!("{other} is not implemented yet"),
@@ -1418,6 +1653,47 @@ impl Daemon {
                 "this machine's public internet address couldn't be found; check the internet connection and try again",
             )
         })
+    }
+
+    /// Where a server's domain should point: the relay (VPS) when the server goes through one,
+    /// otherwise this machine's public address. Returns the IPv4 and the public port.
+    async fn domain_target(
+        &self,
+        instance: InstanceId,
+        local_port: u16,
+    ) -> Result<(std::net::Ipv4Addr, u16), ApiError> {
+        if let Some(cfg) = crate::relay::load_config(self)
+            && let Some(port) = cfg.ports.get(&instance).copied()
+        {
+            let host = cfg.host();
+            let ip = match host.parse::<std::net::Ipv4Addr>() {
+                Ok(ip) => ip,
+                Err(_) => tokio::net::lookup_host((host.as_str(), 0))
+                    .await
+                    .ok()
+                    .and_then(|mut it| {
+                        it.find_map(|a| match a.ip() {
+                            std::net::IpAddr::V4(v) => Some(v),
+                            std::net::IpAddr::V6(_) => None,
+                        })
+                    })
+                    .ok_or_else(|| {
+                        err(
+                            ErrorCode::UpstreamError,
+                            format!("the relay address {host} couldn't be resolved"),
+                        )
+                    })?,
+            };
+            return Ok((ip, port));
+        }
+        Ok((self.public_ip_or_err().await?, local_port))
+    }
+
+    /// The public port friends use for a server (the relay port when relayed).
+    fn public_port(&self, instance: InstanceId, local_port: u16) -> u16 {
+        crate::relay::load_config(self)
+            .and_then(|c| c.ports.get(&instance).copied())
+            .unwrap_or(local_port)
     }
 
     fn cf_err(e: msm_providers::cloudflare::CloudflareError) -> ApiError {
@@ -1476,10 +1752,9 @@ impl Daemon {
                 let InstanceRef { instance } = params(p)?;
                 let inst = self.instance(instance).await?;
                 let link = self.dns_links().get(&instance.to_string()).cloned();
-                let share = link
-                    .as_ref()
-                    .and_then(|l| l["hostname"].as_str())
-                    .map(|h| domains::share_address(h, inst.manifest.port));
+                let share = link.as_ref().and_then(|l| l["hostname"].as_str()).map(|h| {
+                    domains::share_address(h, self.public_port(instance, inst.manifest.port))
+                });
                 Ok(json!({
                     "cloudflare_connected": self.cloudflare_token_path().is_file(),
                     "link": link,
@@ -1540,8 +1815,7 @@ impl Daemon {
                 let inst = self.instance(instance).await?;
                 let host = domains::normalize_hostname(&hostname)
                     .map_err(|e| err(ErrorCode::InvalidArgument, e))?;
-                let port = inst.manifest.port;
-                let ip = self.public_ip_or_err().await?;
+                let (ip, port) = self.domain_target(instance, inst.manifest.port).await?;
                 let mut links = self.dns_links();
                 if links.iter().any(|(k, v)| {
                     *k != instance.to_string() && v["hostname"].as_str() == Some(host.as_str())
@@ -1614,9 +1888,9 @@ impl Daemon {
                     .ok_or_else(|| {
                         err(ErrorCode::NotFound, "no domain is linked to this server")
                     })?;
-                let ip = self.public_ip_or_err().await?;
+                let (ip, port) = self.domain_target(instance, inst.manifest.port).await?;
                 let host = link["hostname"].as_str().unwrap_or_default();
-                Ok(json!({ "records": domains::planned_records(host, ip, inst.manifest.port) }))
+                Ok(json!({ "records": domains::planned_records(host, ip, port) }))
             }
             "domains.unlink" => {
                 let InstanceRef { instance } = params(p)?;
@@ -1649,8 +1923,8 @@ impl Daemon {
                     })?;
                 let host = link["hostname"].as_str().unwrap_or_default().to_owned();
                 let srv_name = format!("_minecraft._tcp.{host}");
-                let (public, a, srv) = tokio::join!(
-                    msm_engine::network::public_ipv4(&self.downloader),
+                let (target, a, srv) = tokio::join!(
+                    self.domain_target(instance, inst.manifest.port),
                     msm_providers::cloudflare::lookup(&self.downloader, &host, "A"),
                     msm_providers::cloudflare::lookup(&self.downloader, &srv_name, "SRV"),
                 );
@@ -1659,10 +1933,10 @@ impl Daemon {
                 })?;
                 Ok(json!(domains::check(
                     &host,
-                    public.ip,
+                    target.as_ref().ok().map(|t| t.0),
                     a,
                     &srv.unwrap_or_default(),
-                    inst.manifest.port
+                    target.map_or(inst.manifest.port, |t| t.1)
                 )))
             }
             other => Err(err(
@@ -1694,9 +1968,6 @@ impl Daemon {
             return;
         }
         let Some(cf) = self.cloudflare() else { return };
-        let Some(ip) = msm_engine::network::public_ipv4(&self.downloader).await.ip else {
-            return;
-        };
         let mut changed = false;
         let mut updated = links.clone();
         for (id, link) in &links {
@@ -1709,7 +1980,9 @@ impl Daemon {
             let Ok(inst) = self.instance(instance).await else {
                 continue;
             };
-            let port = inst.manifest.port;
+            let Ok((ip, port)) = self.domain_target(instance, inst.manifest.port).await else {
+                continue;
+            };
             if link["last_ip"].as_str() == Some(ip.to_string().as_str())
                 && link["port"].as_u64() == Some(u64::from(port))
             {

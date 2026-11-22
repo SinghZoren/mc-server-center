@@ -8,6 +8,7 @@
 
 mod daemon;
 mod events;
+mod relay;
 mod remote_server;
 mod runner;
 mod runner_client;
@@ -84,6 +85,7 @@ async fn serve(data: DataDir, custom_dir: bool) -> Result<(), String> {
         data.root().display()
     );
     daemon.spawn_dns_updater();
+    relay::RelayClient::restart(&daemon);
     if let Some((bind, port)) = daemon.remote_listen_setting() {
         match remote_server::start(daemon.clone(), bind, port).await {
             Ok(fp) => eprintln!(

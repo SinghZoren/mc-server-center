@@ -121,6 +121,11 @@ export async function call<T>(cmd: string, params?: unknown): Promise<T> {
   return invoke<T>("daemon_request", { host: currentHost, cmd, params: params ?? null });
 }
 
+/** A call to a specific host (for flows that involve two machines, like the relay). */
+export async function callOn<T>(host: string, cmd: string, params?: unknown): Promise<T> {
+  return invoke<T>("daemon_request", { host, cmd, params: params ?? null });
+}
+
 export async function subscribe(topic: string, fromSeq: number | null = 0): Promise<void> {
   await invoke("daemon_subscribe", { host: currentHost, topic, fromSeq });
 }

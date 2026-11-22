@@ -136,6 +136,17 @@ pub const COMMANDS: &[CommandSpec] = &[
     read("devices.list", C::Admin),
     write("devices.revoke", C::Admin),
     write("devices.rotate", C::View),
+    // Relay (TUN-01). On the VPS: codes for home servers, and the ports they open.
+    write("relay.create_code", C::Network),
+    write("relay.open", C::Relay),
+    write("relay.close", C::Relay),
+    read("relay.hosted", C::View),
+    // At home: connect to a VPS relay and choose which servers go through it.
+    read("relay.status", C::View),
+    secret("relay.setup", C::Network),
+    write("relay.expose", C::Network),
+    write("relay.unexpose", C::Network),
+    write("relay.remove", C::Network),
     // Domains (DNS-01..05). DNS credentials are sensitive.
     read("domains.status", C::View),
     read("domains.check", C::View),

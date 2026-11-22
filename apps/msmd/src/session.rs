@@ -41,7 +41,7 @@ pub async fn serve<S>(
             return;
         }
     };
-    let _ = client;
+    let relay_data = client.name == crate::relay::DATA_CLIENT;
     if conn
         .send(&Message::HelloOk {
             proto: negotiated,
@@ -55,6 +55,11 @@ pub async fn serve<S>(
         .await
         .is_err()
     {
+        return;
+    }
+
+    if relay_data {
+        crate::relay::serve_data(daemon, conn, principal).await;
         return;
     }
 
@@ -99,7 +104,14 @@ pub async fn serve<S>(
                         });
                     }
                     Message::Sub { topic, from_seq } => {
-                        if !principal.has(msm_api::Capability::View) || !valid_topic(&topic) {
+                        // Relay topics belong to one device; everything else needs View.
+                        let allowed = match (&principal, topic.strip_prefix("relay/")) {
+                            (Principal::Device { id, scopes }, Some(dev)) => dev == id.to_string() && scopes.contains(&msm_api::Capability::Relay),
+                            (Principal::Device { .. }, None) => principal.has(msm_api::Capability::View),
+                            (_, Some(_)) => false,
+                            (_, None) => principal.has(msm_api::Capability::View),
+                        };
+                        if !allowed || !valid_topic(&topic) {
                             continue;
                         }
                         if forwarders.iter().any(|(t, _)| *t == topic) {

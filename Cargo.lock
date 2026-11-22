@@ -2397,6 +2397,7 @@ dependencies = [
 name = "msmd"
 version = "0.1.1"
 dependencies = [
+ "hex",
  "msm-api",
  "msm-core",
  "msm-engine",
@@ -2404,6 +2405,7 @@ dependencies = [
  "msm-providers",
  "msm-storage",
  "msm-transport",
+ "rand 0.8.8",
  "serde",
  "serde_json",
  "tempfile",

@@ -23,7 +23,7 @@ const VERDICT: Record<Check["verdict"], { tone: "ok" | "warn" | "info"; text: st
   direct_possible: { tone: "ok", text: "Your router has your public address, so opening a port should let friends connect." },
   cgnat_likely: {
     tone: "warn",
-    text: "Your internet provider probably shares one public address between many homes (carrier-grade NAT). Opening ports usually won't work. Options: ask your provider for a public IP, use IPv6, or run a relay on a small server you rent (coming soon).",
+    text: "Your internet provider probably shares one public address between many homes (carrier-grade NAT). Opening ports usually won't work. Options: ask your provider for a public IP, use IPv6, or use Through your VPS below: friends join via a small server you rent, with nothing to open at home.",
   },
   double_nat_likely: {
     tone: "warn",

@@ -50,7 +50,7 @@ export function HostSwitcher({ host, onChange }: { host: string; onChange: (id: 
   );
 }
 
-function AddHost({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) => void }) {
+export function AddHost({ onClose, onAdded }: { onClose: () => void; onAdded: (id: string) => void }) {
   const [address, setAddress] = useState("");
   const [code, setCode] = useState("");
   const [name, setName] = useState("");

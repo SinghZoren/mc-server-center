@@ -217,6 +217,39 @@ that proves it, and offers a fix button where one exists. It recognises:
 
 Nothing on your PC or router is changed unless you click the button for it.
 
+### Through your VPS (relay): when ports can't be opened
+
+Some internet providers share one public address between many homes (carrier-grade NAT, the
+connection check tells you). Then nothing you do at home lets friends in. The relay fixes that
+with a small server you rent (a VPS, from a few dollars a month):
+
+```text
+friends ──▶ your VPS :25565 ──▶ (encrypted tunnel that your PC opens) ──▶ your PC's server
+```
+
+1. Add the VPS to the app once ([one command on the VPS](#running-servers-on-a-linux-machine)).
+2. On the server's **Overview**, open **Through your VPS**, pick the VPS and click **Relay this
+   server**.
+3. Give friends the address it shows (for example `203.0.113.9:25565`). If your VPS provider
+   has a firewall, allow that port there.
+
+How it works:
+- Your PC makes an **outgoing** connection to the VPS, so nothing has to be opened at home.
+- The connection uses the same TLS 1.3 with pinned certificates as remote management.
+- The VPS only accepts your PC after a one-time pairing code, and that pairing grants nothing
+  but relaying.
+- It reconnects by itself after restarts or network drops.
+- Removing the device on the VPS cuts it off immediately.
+- Several servers can share one VPS, each on its own port.
+- No third party is involved.
+
+Things to know:
+- Players appear to the Minecraft server as connecting from your PC, so IP bans don't work for
+  relayed players. Name bans and the whitelist work as usual.
+- Game traffic travels via the VPS, so pick one near you and your friends.
+
+![Relay card](docs/images/relay.webp)
+
 ### Use your own domain
 
 Instead of sharing a number like `203.0.113.5:25565`, give friends a name like
@@ -240,7 +273,8 @@ it points at this machine.
 ![Linking a domain](docs/images/domain.webp)
 
 A domain gives your server a name; it doesn't open your network. If friends can't reach you by IP
-address, they can't reach you by name either: fix that first, or run the server on a VPS.
+address, they can't reach you by name either: fix that first, use the relay, or run the server on
+a VPS. For a relayed server, the domain automatically points at the VPS.
 
 ---
 
@@ -362,6 +396,8 @@ flowchart LR
     LD["msmd (systemd)"] --> LR["runner"] --> LJ["Java<br/>Minecraft server"]
   end
   UI -- "TLS 1.3, pinned certificates" --> LD
+  D -. "relay tunnel (outbound, optional)" .-> LD
+  FR["friends"] --> LD
   D -. "downloads, hash-checked" .-> UP["Mojang · Paper · Fabric<br/>Modrinth · Adoptium"]
 ```
 
@@ -515,15 +551,14 @@ Working today:
 - **Java:** installed and managed automatically.
 - **Running servers:** console, players, quick commands and macros, settings.
 - **Content and data:** mods and plugins, backups and restore, crash diagnosis.
-- **Friends and remote access:** the connection helper, firewall/UPnP, your own domain
-  (Cloudflare automatic or any provider), and VPS / remote Linux management with a one-command
-  installer.
+- **Friends and remote access:** the connection helper, firewall/UPnP, a self-hosted relay
+  through your own VPS (works behind CGNAT), your own domain (Cloudflare automatic or any
+  provider), and VPS / remote Linux management with a one-command installer.
 - **Desktop:** tray icon, and servers that survive app and service restarts.
 - **Tests:** 180+ automated tests.
 
 Not done yet:
 - **Server types:** Forge and NeoForge servers and modpacks.
-- **Friends behind CGNAT:** a self-hosted relay you run on your own VPS.
 - **Backups:** scheduled, automatic.
 - **Distribution:** code-signed builds and automatic updates.
 - **Secrets:** storage in Windows Credential Manager. Today they are files readable only by your
