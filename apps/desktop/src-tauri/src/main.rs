@@ -1,9 +1,8 @@
 //! Desktop controller entry point (LIFE-03, REM-02/03).
 //!
-//! * Closing the window hides it to the system tray; servers keep running in the background
-//!   service (`msmd`) either way.
-//! * The tray menu offers Open, Stop all servers, and Quit. Quitting closes only this app; the
-//!   service and any running servers continue until stopped.
+//! * Closing the window or choosing Quit in the tray quits everything: servers are stopped
+//!   cleanly, the background service (`msmd`) shuts down, and any leftover `msmd.exe` is ended.
+//! * The tray menu offers Open, Stop all servers, and Quit.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod daemon_link;
@@ -12,6 +11,7 @@ mod hosts;
 use hosts::{HostRecord, Hosts};
 use msm_api::ApiError;
 use serde_json::{Value, json};
+use std::time::Duration;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
@@ -84,10 +84,76 @@ fn remove_host(hosts: tauri::State<'_, Hosts>, id: String) -> Result<(), ApiErro
     hosts.remove(&id)
 }
 
-/// Quits the app window and tray (servers keep running).
+/// Quits everything: stops this PC's servers cleanly, shuts down the background service, then
+/// force-ends any `msmd.exe` still left (a hung or older service) so the next start is clean.
 #[tauri::command]
 fn quit_app(app: AppHandle) {
-    app.exit(0);
+    quit_everything(&app);
+}
+
+fn quit_everything(app: &AppHandle) {
+    use std::sync::atomic::Ordering;
+    if daemon_link::QUITTING.swap(true, Ordering::SeqCst) {
+        return; // already quitting
+    }
+    let _ = app.emit("msm-quitting", ());
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_tooltip(Some("MC Server Center: stopping servers…"));
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let link = app.state::<Hosts>().link("local").ok();
+        let mut pid = None;
+        if let Some(link) = &link {
+            let info = tokio::time::timeout(
+                Duration::from_secs(3),
+                link.request("system.info".into(), Value::Null),
+            )
+            .await;
+            pid = info.ok().and_then(Result::ok).and_then(|v| v["pid"].as_u64());
+            if pid.is_some() {
+                // Waits while servers save and stop (each force-ended after ~50 s).
+                let _ = tokio::time::timeout(
+                    Duration::from_secs(100),
+                    link.request("system.shutdown".into(), json!({"stop_servers": true})),
+                )
+                .await;
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+            }
+        }
+        force_end(pid);
+        app.exit(0);
+    });
+}
+
+/// Ends the service if it is still there, plus any other `msmd.exe` (with their child processes).
+fn force_end(pid: Option<u64>) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let run = |args: &[&str]| {
+            let _ = std::process::Command::new("taskkill")
+                .args(args)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW)
+                .status();
+        };
+        if let Some(pid) = pid {
+            run(&["/F", "/T", "/PID", &pid.to_string()]);
+        }
+        run(&["/F", "/T", "/IM", "msmd.exe"]);
+    }
+    #[cfg(not(windows))]
+    {
+        if let Some(pid) = pid {
+            let _ = std::process::Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .status();
+        }
+    }
 }
 
 fn show_main(app: &AppHandle) {
@@ -104,7 +170,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let quit = MenuItem::with_id(
         app,
         "quit",
-        "Quit (servers keep running)",
+        "Quit (stops servers)",
         true,
         None::<&str>,
     )?;
@@ -133,7 +199,7 @@ fn build_tray(app: &tauri::App) -> tauri::Result<()> {
                     );
                 });
             }
-            "quit" => app.exit(0),
+            "quit" => quit_everything(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -168,11 +234,11 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing hides to the tray instead of quitting; servers are unaffected either way.
+            // Closing the window (X, or "Close window" on the taskbar) quits everything; the
+            // window stays up showing progress until servers have stopped.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                let _ = window.hide();
-                let _ = window.emit("msm-tray", "hidden");
+                quit_everything(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![

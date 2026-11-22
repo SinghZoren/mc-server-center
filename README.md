@@ -104,8 +104,9 @@ yourself.
 4. Click **▶ Start**. When the status shows **Online**, the **Overview** tab shows the address to
    give your friends.
 
-Closing the window keeps the app in the system tray. **Your servers keep running** until you stop
-them, even if you quit the app. The tray menu has **Stop all servers**.
+Closing the window (or **Quit** in the tray) saves and stops your servers, shuts down the
+background service, and exits completely, so the next start is clean. The tray menu also has
+**Stop all servers**.
 
 ---
 

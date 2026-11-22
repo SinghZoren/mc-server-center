@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useQuery } from "@tanstack/react-query";
 import { api, getHost, setHost, type Instance } from "./lib/api";
 import { HostSwitcher } from "./components/HostSwitcher";
@@ -11,7 +12,24 @@ import { ServerView } from "./views/ServerView";
 
 export function App() {
   const [host, setHostState] = useState(getHost());
+  const [quitting, setQuitting] = useState(false);
   const qc = useQueryClient();
+  useEffect(() => {
+    let off: (() => void) | undefined;
+    void listen("msm-quitting", () => setQuitting(true)).then((u) => (off = u));
+    return () => off?.();
+  }, []);
+  if (quitting) {
+    return (
+      <div className="grid h-full place-items-center p-8 text-center" role="status">
+        <div className="space-y-3">
+          <Spinner label="Quitting" />
+          <p className="font-display text-lg font-semibold">Saving worlds and stopping servers…</p>
+          <p className="text-sm text-muted">MC Server Center closes by itself when everything has stopped. This can take up to a minute.</p>
+        </div>
+      </div>
+    );
+  }
   return (
     <HostScope
       key={host}
@@ -166,7 +184,7 @@ function ConnectionBar({ state, detail }: { state: string; detail: string | null
     <div className="border-t border-line px-5 py-3 text-xs text-muted" role="status" title={detail ?? undefined}>
       <span className="mr-2 inline-block h-1.5 w-1.5" style={{ background: color }} />
       {text}
-      <p className="mt-1 text-[11px] text-faint">Closing the window keeps the app in the tray. Servers keep running until you stop them.</p>
+      <p className="mt-1 text-[11px] text-faint">Closing the window saves and stops your servers, then quits.</p>
     </div>
   );
 }

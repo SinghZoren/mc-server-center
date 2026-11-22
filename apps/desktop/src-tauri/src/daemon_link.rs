@@ -188,10 +188,16 @@ async fn try_local(data: &DataDir) -> std::io::Result<Box<dyn Stream>> {
     Ok(s)
 }
 
+/// Set while the app is quitting, so the reconnect loop doesn't start the service again.
+pub static QUITTING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 async fn open_local(app: &AppHandle, host: &str) -> Result<Box<dyn Stream>, String> {
     let data = DataDir::default_for_os().map_err(|e| e.to_string())?;
     if let Ok(s) = try_local(&data).await {
         return Ok(s);
+    }
+    if QUITTING.load(std::sync::atomic::Ordering::SeqCst) {
+        return Err("the app is quitting".into());
     }
     status(
         app,

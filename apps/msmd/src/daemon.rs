@@ -1222,9 +1222,26 @@ impl Daemon {
                 Ok(json!({"stopping": stopping}))
             }
             "system.shutdown" => {
-                // Stops only this service (used by the desktop app after an update so the new
-                // version takes over). Servers keep running in their runners and are
-                // re-attached by the next service.
+                // By default stops only this service (used by the desktop app after an update so
+                // the new version takes over): servers keep running in their runners and are
+                // re-attached by the next service. With `stop_servers`, servers are first stopped
+                // cleanly (worlds saved), force-killed only if they don't stop in time; used when
+                // the user quits the app.
+                if p.get("stop_servers").and_then(Value::as_bool) == Some(true) {
+                    let all: Vec<_> = self.instances.read().await.values().cloned().collect();
+                    let mut stops = tokio::task::JoinSet::new();
+                    for inst in all {
+                        let Some(proc) = inst.process() else { continue };
+                        let me = self.clone();
+                        stops.spawn(async move {
+                            let _ = me.stop(inst.clone(), DEFAULT_STOP_TIMEOUT).await;
+                            if tokio::time::timeout(Duration::from_secs(50), proc.wait_exit()).await.is_err() {
+                                let _ = me.kill(inst).await;
+                            }
+                        });
+                    }
+                    while stops.join_next().await.is_some() {}
+                }
                 let me = self.clone();
                 tokio::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
