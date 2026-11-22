@@ -42,6 +42,9 @@ const friendly: Record<string, string> = {
 
 export function errorText(e: unknown): string {
   if (isApiError(e)) {
+    if (e.detail?.startsWith("unknown command")) {
+      return "The background service is older than this app, so this isn't available. Quit the app from the tray, end \"msmd.exe\" in Task Manager, then open the app again.";
+    }
     const base = friendly[e.code];
     return base ? `${base}` : e.detail || e.code;
   }

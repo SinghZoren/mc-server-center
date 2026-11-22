@@ -34,7 +34,8 @@ export function ServerView({ inst }: { inst: Instance }) {
           <PowerControls inst={inst} />
         </div>
         <nav className="mt-6 flex gap-1" role="tablist" aria-label="Server sections">
-          {TABS.map((t) => (
+          {/* Vanilla servers can't load mods or plugins. */}
+          {TABS.filter((t) => t !== "Mods" || inst.software !== "vanilla").map((t) => (
             <button
               key={t}
               role="tab"

@@ -129,6 +129,7 @@ const shim = `
       }
       if (cmd === "plugin:event|unlisten") { listeners.delete(args.eventId); return null; }
       if (cmd === "list_hosts") return [{ id: "local", name: "This PC", address: null }];
+      if (cmd === "connection_status") return { host: "local", state: "connected", detail: null };
       if (cmd === "daemon_request" || cmd === "daemon_subscribe") {
         const r = await post({ cmd, args });
         if (r.err) throw r.err;

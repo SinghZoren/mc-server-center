@@ -44,6 +44,15 @@ async fn daemon_subscribe(
     Ok(())
 }
 
+/// The last known connection state of a host (events only report changes).
+#[tauri::command]
+fn connection_status(
+    states: tauri::State<'_, daemon_link::ConnStates>,
+    host: String,
+) -> Option<daemon_link::UiConnection> {
+    states.0.lock().ok().and_then(|m| m.get(&host).cloned())
+}
+
 /// Lists hosts: this PC plus paired remotes.
 #[tauri::command]
 fn list_hosts(hosts: tauri::State<'_, Hosts>) -> Value {
@@ -151,6 +160,7 @@ fn main() {
                 .path()
                 .app_data_dir()
                 .unwrap_or_else(|_| std::env::temp_dir().join("msm-desktop"));
+            app.manage(daemon_link::ConnStates::default());
             let hosts = Hosts::new(dir);
             hosts.start_all(app.handle());
             app.manage(hosts);
@@ -171,7 +181,8 @@ fn main() {
             quit_app,
             list_hosts,
             pair_host,
-            remove_host
+            remove_host,
+            connection_status
         ])
         .run(tauri::generate_context!());
     if let Err(e) = result {

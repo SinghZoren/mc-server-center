@@ -115,7 +115,22 @@ impl DaemonLink {
     }
 }
 
+/// Last known connection state per host, so a window that opens later can ask for it.
+#[derive(Default)]
+pub struct ConnStates(pub std::sync::Mutex<HashMap<String, UiConnection>>);
+
 fn status(app: &AppHandle, host: &str, state: &'static str, detail: Option<String>) {
+    use tauri::Manager;
+    let ui = UiConnection {
+        host: host.to_owned(),
+        state,
+        detail: detail.clone(),
+    };
+    if let Some(states) = app.try_state::<ConnStates>()
+        && let Ok(mut map) = states.0.lock()
+    {
+        map.insert(host.to_owned(), ui);
+    }
     let _ = app.emit(
         "msm-connection",
         UiConnection {
@@ -238,62 +253,100 @@ fn version_older(a: &str, b: &str) -> bool {
     parse(a) < parse(b)
 }
 
-/// After the app was updated, the previous service may still be running (servers keep it in
-/// use, so the installer moves it aside instead of replacing it). Ask it to step down; the
-/// reconnect then starts the new `msmd` next to this app, which re-attaches to the running
-/// servers.
-async fn replace_old_service(conn: &mut Conn) {
+/// One request on a raw connection (used before the connection task takes over).
+async fn raw_request(conn: &mut Conn, cmd: &str) -> Result<Value, ApiError> {
     let id = RequestId::new();
     let req = Message::Req {
         id,
-        cmd: "system.shutdown".into(),
+        cmd: cmd.into(),
         params: Value::Null,
         idempotency_key: None,
     };
-    if conn.send(&req).await.is_err() {
-        return;
-    }
-    let _ = tokio::time::timeout(Duration::from_secs(5), async {
-        while let Ok(Some(m)) = conn.recv().await {
-            if matches!(m, Message::Res { id: rid, .. } if rid == id) {
-                break;
+    conn.send(&req)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::Internal, e.to_string()))?;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            match conn.recv().await {
+                Ok(Some(Message::Res { id: rid, outcome })) if rid == id => {
+                    return match outcome {
+                        Outcome::Ok(v) => Ok(v),
+                        Outcome::Err(e) => Err(e),
+                    };
+                }
+                Ok(Some(_)) => {}
+                _ => return Err(ApiError::new(ErrorCode::Internal, "connection closed")),
             }
         }
     })
-    .await;
-    // Wait for it to release the data directory lock.
-    tokio::time::sleep(Duration::from_millis(1500)).await;
+    .await
+    .map_err(|_| ApiError::new(ErrorCode::Internal, "no answer"))?
 }
 
-async fn connect(app: &AppHandle, host: &str, target: &Target) -> Result<Conn, String> {
-    if let Target::Local = target {
+/// Whether two paths name the same file (case-insensitive on Windows).
+fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    let norm = |p: &std::path::Path| {
+        let p = std::fs::canonicalize(p).unwrap_or_else(|_| p.to_owned());
+        let s = p.to_string_lossy().into_owned();
+        if cfg!(windows) { s.to_lowercase() } else { s }
+    };
+    norm(a) == norm(b)
+}
+
+/// Connects; for this PC, also makes sure the service is the one shipped next to this app.
+///
+/// A different `msmd` can still be running: the previous version after an update (servers keep
+/// it in use, so the installer moves it aside instead of replacing it), or one from another
+/// install or a development build. Such a service is asked to step down; the reconnect then
+/// starts the right one, which re-attaches to the running servers. Services too old to step
+/// down are left running and the user is told what to do (returned as a warning).
+async fn connect(
+    app: &AppHandle,
+    host: &str,
+    target: &Target,
+) -> Result<(Conn, Option<String>), String> {
+    let Target::Remote {
+        address,
+        fingerprint,
+        identity,
+    } = target
+    else {
         let (mut conn, version) = handshake_versioned(open_local(app, host).await?).await?;
-        if !version_older(&version, env!("CARGO_PKG_VERSION")) || daemon_exe().is_none() {
-            return Ok(conn);
+        let Some(ours) = daemon_exe() else {
+            return Ok((conn, None));
+        };
+        let running = raw_request(&mut conn, "system.info")
+            .await
+            .ok()
+            .and_then(|v| v["exe"].as_str().map(PathBuf::from));
+        let stale = version_older(&version, env!("CARGO_PKG_VERSION"))
+            || !running.as_deref().is_some_and(|p| same_file(p, &ours));
+        if !stale {
+            return Ok((conn, None));
         }
         status(
             app,
             host,
             "starting",
-            Some("Switching to the updated service…".into()),
+            Some("Switching to this version's service…".into()),
         );
-        replace_old_service(&mut conn).await;
-        drop(conn);
-        return handshake(open_local(app, host).await?).await;
-    }
-    let stream: Box<dyn Stream> = match target {
-        Target::Local => open_local(app, host).await?,
-        Target::Remote {
-            address,
-            fingerprint,
-            identity,
-        } => {
-            let (tls, _) =
-                msm_transport::remote::connect(address, identity, Some(fingerprint)).await?;
-            Box::new(tls)
+        if raw_request(&mut conn, "system.shutdown").await.is_ok() {
+            drop(conn);
+            // Wait for it to release the data directory lock.
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+            let conn = handshake(open_local(app, host).await?).await?;
+            return Ok((conn, None));
         }
+        let from = running
+            .map(|p| format!(" (from {})", p.display()))
+            .unwrap_or_default();
+        let warning = format!(
+            "An older MC Server Center service is still running{from}, so some features won't work.              Stop your servers, quit this app from the tray, end \"msmd.exe\" in Task Manager, then open the app again."
+        );
+        return Ok((conn, Some(warning)));
     };
-    handshake(stream).await
+    let (tls, _) = msm_transport::remote::connect(address, identity, Some(fingerprint)).await?;
+    Ok((handshake(Box::new(tls)).await?, None))
 }
 
 async fn run(app: AppHandle, host: String, target: Target, mut rx: mpsc::Receiver<Outgoing>) {
@@ -303,7 +356,7 @@ async fn run(app: AppHandle, host: String, target: Target, mut rx: mpsc::Receive
 
     loop {
         status(&app, &host, "connecting", None);
-        let mut conn = match connect(&app, &host, &target).await {
+        let (mut conn, warning) = match connect(&app, &host, &target).await {
             Ok(c) => c,
             Err(detail) => {
                 status(&app, &host, "disconnected", Some(detail));
@@ -327,7 +380,10 @@ async fn run(app: AppHandle, host: String, target: Target, mut rx: mpsc::Receive
             }
         };
         backoff = Duration::from_millis(250);
-        status(&app, &host, "connected", None);
+        match warning {
+            Some(w) => status(&app, &host, "outdated", Some(w)),
+            None => status(&app, &host, "connected", None),
+        }
         for (topic, seq) in &cursors {
             let _ = conn
                 .send(&Message::Sub {

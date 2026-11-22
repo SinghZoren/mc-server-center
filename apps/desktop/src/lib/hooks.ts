@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { call, getHost, onConnection, onEvent, subscribe, type UiConnection, type UiEvent } from "./api";
+import { connectionStatus, getHost, onConnection, onEvent, subscribe, type UiConnection, type UiEvent } from "./api";
 
 /** Calls `handler` for every daemon event whose topic matches `topic` exactly. Subscribes once. */
 export function useTopic(topic: string | null, handler: (e: UiEvent) => void, fromSeq: number | null = 0) {
@@ -48,9 +48,9 @@ export function useConnection(): UiConnection {
     let unlisten: (() => void) | undefined;
     let live = true;
     void onConnection(setC).then((u) => (unlisten = u));
-    // State events only fire on changes; ask once so an already-open connection shows as such.
-    void call("system.ping")
-      .then(() => live && setC((prev) => (prev.state === "connecting" ? { ...prev, state: "connected" } : prev)))
+    // State events only fire on changes; ask for the current one too.
+    void connectionStatus()
+      .then((s) => live && s && setC((prev) => (prev.state === "connecting" ? s : prev)))
       .catch(() => undefined);
     return () => {
       live = false;

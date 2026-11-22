@@ -102,7 +102,7 @@ export interface UiEvent {
 
 export interface UiConnection {
   host: string;
-  state: "connecting" | "starting" | "connected" | "disconnected" | "failed";
+  state: "connecting" | "starting" | "connected" | "outdated" | "disconnected" | "failed";
   detail: string | null;
 }
 
@@ -142,6 +142,11 @@ export interface HostInfo {
   id: string;
   name: string;
   address: string | null;
+}
+
+/** Last known connection state of the current host (events only report changes). */
+export function connectionStatus(): Promise<UiConnection | null> {
+  return invoke<UiConnection | null>("connection_status", { host: currentHost });
 }
 
 export const hostsApi = {

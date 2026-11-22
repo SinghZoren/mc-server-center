@@ -79,7 +79,13 @@ function HostScope({ host, onHostChange }: { host: string; onHostChange: (h: str
         <ConnectionBar state={connection.state} detail={connection.detail} />
       </aside>
 
-      <main className="relative flex-1 overflow-hidden">
+      <main className="relative flex flex-1 flex-col overflow-hidden">
+        {connection.state === "outdated" && (
+          <div className="border-b border-line px-10 py-3">
+            <Notice tone="warn">{connection.detail}</Notice>
+          </div>
+        )}
+        <div className="relative min-h-0 flex-1">
         {instances.isPending && connection.state !== "disconnected" ? (
           <div className="grid h-full place-items-center">
             <Spinner label="Connecting to the service" />
@@ -107,6 +113,7 @@ function HostScope({ host, onHostChange }: { host: string; onHostChange: (h: str
             )}
           </div>
         )}
+        </div>
       </main>
 
       {creating && (
@@ -145,7 +152,15 @@ function ServerTab({ inst, active, index, onClick }: { inst: Instance; active: b
 
 function ConnectionBar({ state, detail }: { state: string; detail: string | null }) {
   const text =
-    state === "connected" ? "Service running" : state === "starting" ? "Starting service…" : state === "connecting" ? "Connecting…" : "Service offline";
+    state === "connected"
+      ? "Service running"
+      : state === "outdated"
+        ? "Old service running"
+        : state === "starting"
+          ? "Starting service…"
+          : state === "connecting"
+            ? "Connecting…"
+            : "Service offline";
   const color = state === "connected" ? "var(--color-moss)" : state === "disconnected" || state === "failed" ? "var(--color-danger)" : "var(--color-amber)";
   return (
     <div className="border-t border-line px-5 py-3 text-xs text-muted" role="status" title={detail ?? undefined}>

@@ -325,6 +325,9 @@ impl Daemon {
                 "os": std::env::consts::OS,
                 "arch": std::env::consts::ARCH,
                 "data_dir": self.data.root(),
+                // Lets the desktop app tell whether this is the service it shipped with.
+                "exe": std::env::current_exe().ok(),
+                "pid": std::process::id(),
             })),
             "catalog.list" => {
                 #[derive(Deserialize, Default)]

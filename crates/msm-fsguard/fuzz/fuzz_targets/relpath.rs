@@ -11,7 +11,7 @@ fuzz_target!(|data: &[u8]| {
         let s = rel.as_str();
         assert!(!s.is_empty());
         assert!(!s.starts_with('/'));
-        assert!(!s.contains('\') && !s.contains(':'));
+        assert!(!s.contains('\\') && !s.contains(':'));
         assert!(s.split('/').all(|c| !c.is_empty() && c != "." && c != ".."));
         // Canonical: parsing the normalized form yields the same value.
         assert_eq!(RelPath::parse(s).as_ref(), Ok(&rel));
