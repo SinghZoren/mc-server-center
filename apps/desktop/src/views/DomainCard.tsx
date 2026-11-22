@@ -22,6 +22,8 @@ interface PlannedRecord {
   name: string;
   value: string;
   note: string;
+  /** The record split into the boxes most providers' forms have (older services omit it). */
+  fields?: { label: string; value: string; hint: string | null }[];
 }
 interface DnsCheck {
   a_ok: boolean;
@@ -187,37 +189,71 @@ export function DomainCard({ inst }: { inst: Instance }) {
 
 function RecordTable({ records }: { records: PlannedRecord[] }) {
   return (
-    <div className="space-y-2">
-      <p className="text-sm text-muted">Add these records at your domain provider (its "DNS" or "DNS records" page):</p>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-xs">
-          <thead className="text-faint">
-            <tr>
-              <th className="py-1 pr-4 font-semibold">Type</th>
-              <th className="py-1 pr-4 font-semibold">Name</th>
-              <th className="py-1 pr-4 font-semibold">Value</th>
-            </tr>
-          </thead>
-          <tbody>
-            {records.map((r) => (
-              <tr key={r.kind + r.name} className="border-t border-line align-top">
-                <td className="console py-2 pr-4">{r.kind}</td>
-                <td className="console py-2 pr-4">
-                  {r.name} <Copy text={r.name} />
-                </td>
-                <td className="console py-2 pr-4">
-                  {r.value} <Copy text={r.value} />
-                  <p className="mt-1 font-sans text-[11px] text-faint">{r.note}</p>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="text-xs text-faint">
-        Some providers want only the part before your domain as the name (for example <span className="console">play</span> instead of{" "}
-        <span className="console">play.example.com</span>). Changes can take a few minutes to appear; then use "Check it works".
+    <div className="space-y-3">
+      <p className="text-sm text-muted">
+        At your domain provider, open its "DNS" or "DNS records" page and add {records.length === 1 ? "this record" : `these ${records.length} records`}.
+        Fill each box with the value shown under the same name:
       </p>
+      {records.map((r, i) => (
+        <RecordFields key={r.kind + r.name} record={r} index={i + 1} />
+      ))}
+      <p className="text-xs text-faint">Changes can take a few minutes to appear; then use "Check it works".</p>
+    </div>
+  );
+}
+
+function RecordFields({ record: r, index }: { record: PlannedRecord; index: number }) {
+  const [oneLine, setOneLine] = useState(false);
+  return (
+    <div className="border border-line bg-panel-2/40 p-4">
+      <p className="mb-3 text-sm">
+        <span className="font-semibold">
+          {index}. {r.kind} record
+        </span>{" "}
+        <span className="text-muted">· {r.note}</span>
+      </p>
+      <dl className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-x-4 gap-y-3">
+        {(
+          r.fields ?? [
+            { label: "Name", value: r.name, hint: null },
+            { label: "Value", value: r.value, hint: null },
+          ]
+        ).map((f) => (
+          <div key={f.label} className="min-w-0">
+            <dt className="label mb-1">{f.label}</dt>
+            <dd className="flex items-center gap-1">
+              <span className="console min-w-0 bg-panel px-2 py-1 text-xs break-all text-ink">
+                {f.value}
+              </span>
+              {f.label !== "Type" && f.label !== "TTL" && <Copy text={f.value} />}
+            </dd>
+            {f.hint && <p className="mt-1 text-[11px] leading-snug text-faint">{f.hint}</p>}
+          </div>
+        ))}
+      </dl>
+      {r.kind === "SRV" && (
+        <div className="mt-3">
+          <button className="text-xs text-faint underline-offset-2 hover:text-ink hover:underline" onClick={() => setOneLine((v) => !v)}>
+            {oneLine ? "Hide" : "My provider only has a Name and a Value box"}
+          </button>
+          {oneLine && (
+            <dl className="mt-2 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+              <div>
+                <dt className="label mb-1">Name</dt>
+                <dd className="console flex items-center gap-1">
+                  <span className="min-w-0 truncate">{r.name}</span> <Copy text={r.name} />
+                </dd>
+              </div>
+              <div>
+                <dt className="label mb-1">Value (priority weight port target)</dt>
+                <dd className="console flex items-center gap-1">
+                  <span className="min-w-0 truncate">{r.value}</span> <Copy text={r.value} />
+                </dd>
+              </div>
+            </dl>
+          )}
+        </div>
+      )}
     </div>
   );
 }

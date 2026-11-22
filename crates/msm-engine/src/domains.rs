@@ -76,36 +76,109 @@ pub fn share_address(host: &str, port: u16) -> String {
     }
 }
 
+/// One box to fill in on the provider's "add record" form.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct RecordField {
+    /// The provider's usual label for the box ("Service", "Priority", …).
+    pub label: &'static str,
+    pub value: String,
+    /// Short help shown under the value, if any.
+    pub hint: Option<String>,
+}
+
 /// One DNS record to create at the user's DNS provider.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct PlannedRecord {
     /// `A` or `SRV`.
     pub kind: &'static str,
-    /// Full record name.
+    /// Full record name (for providers with a single "name" box).
     pub name: String,
-    /// What to enter as the value.
+    /// The whole value on one line (for providers with a single "value" box).
     pub value: String,
     /// Plain-language hint.
     pub note: String,
+    /// The record split into the separate boxes most providers' forms have, in their usual order.
+    pub fields: Vec<RecordField>,
+}
+
+/// Second-level labels under which registries sell names (`example.co.uk`), so the domain is the
+/// last three labels instead of two. Covers the common cases; anything else falls back to two.
+const SECOND_LEVEL: &[&str] = &["co", "com", "net", "org", "gov", "edu", "ac", "ltd", "plc"];
+
+/// The name relative to the registered domain, as most providers' forms want it:
+/// `mc.zoren.ca` → `mc`, `zoren.ca` → `@`, `play.example.co.uk` → `play`.
+#[must_use]
+pub fn relative_name(host: &str) -> String {
+    let labels: Vec<&str> = host.split('.').collect();
+    let n = labels.len();
+    let domain_labels =
+        if n >= 3 && labels[n - 1].len() == 2 && SECOND_LEVEL.contains(&labels[n - 2]) {
+            3
+        } else {
+            2
+        };
+    if n <= domain_labels {
+        "@".to_owned()
+    } else {
+        labels[..n - domain_labels].join(".")
+    }
+}
+
+fn field(label: &'static str, value: impl Into<String>, hint: Option<String>) -> RecordField {
+    RecordField {
+        label,
+        value: value.into(),
+        hint,
+    }
 }
 
 /// The records needed for `host` → `ip` with the server on `port`.
 #[must_use]
 pub fn planned_records(host: &str, ip: Ipv4Addr, port: u16) -> Vec<PlannedRecord> {
+    let rel = relative_name(host);
+    let name_hint = Some(if rel == "@" {
+        format!("\"@\" means the domain itself. Some providers want {host} instead.")
+    } else {
+        format!("Some providers want the full {host} instead.")
+    });
+    let ttl = field(
+        "TTL",
+        "Shortest available",
+        Some("For example 1/2 hour, 600 or Auto.".into()),
+    );
     let mut out = vec![PlannedRecord {
         kind: "A",
         name: host.to_owned(),
         value: ip.to_string(),
         note: "Points the name at this machine. Turn off any proxy/CDN option for it (Cloudflare: \"DNS only\").".into(),
+        fields: vec![
+            field("Type", "A", None),
+            field("Name", rel.clone(), name_hint.clone()),
+            field("Value", ip.to_string(), Some("Also called \"Points to\", \"Address\" or \"IPv4\".".into())),
+            ttl.clone(),
+        ],
     }];
     if port != DEFAULT_PORT {
         out.push(PlannedRecord {
             kind: "SRV",
             name: format!("_minecraft._tcp.{host}"),
             value: format!("0 5 {port} {host}"),
-            note: format!(
-                "Lets players type just {host} without :{port}. Fields: priority 0, weight 5, port {port}, target {host}."
-            ),
+            note: format!("Lets players type just {host} without :{port}."),
+            fields: vec![
+                field("Type", "SRV", None),
+                field("Service", "_minecraft", None),
+                field("Protocol", "_tcp", None),
+                field("Name", rel, name_hint),
+                field(
+                    "Value",
+                    host,
+                    Some("Also called \"Target\". The name from the A record above.".into()),
+                ),
+                field("Priority", "0", None),
+                field("Weight", "5", None),
+                field("Port", port.to_string(), None),
+                ttl,
+            ],
         });
     }
     out
@@ -225,6 +298,43 @@ mod tests {
             share_address("mc.example.com", 25570),
             "mc.example.com:25570"
         );
+    }
+
+    #[test]
+    fn srv_is_split_into_provider_form_fields() {
+        let ip = "203.0.113.5".parse().unwrap();
+        let r = planned_records("mc.zoren.ca", ip, 25566);
+        let get = |rec: &PlannedRecord, label: &str| {
+            rec.fields
+                .iter()
+                .find(|f| f.label == label)
+                .unwrap()
+                .value
+                .clone()
+        };
+        assert_eq!(get(&r[0], "Name"), "mc");
+        assert_eq!(get(&r[0], "Value"), "203.0.113.5");
+        let srv = &r[1];
+        for (label, want) in [
+            ("Service", "_minecraft"),
+            ("Protocol", "_tcp"),
+            ("Name", "mc"),
+            ("Value", "mc.zoren.ca"),
+            ("Priority", "0"),
+            ("Weight", "5"),
+            ("Port", "25566"),
+        ] {
+            assert_eq!(get(srv, label), want, "{label}");
+        }
+    }
+
+    #[test]
+    fn relative_names() {
+        assert_eq!(relative_name("mc.zoren.ca"), "mc");
+        assert_eq!(relative_name("zoren.ca"), "@");
+        assert_eq!(relative_name("a.b.example.com"), "a.b");
+        assert_eq!(relative_name("play.example.co.uk"), "play");
+        assert_eq!(relative_name("example.co.uk"), "@");
     }
 
     #[test]

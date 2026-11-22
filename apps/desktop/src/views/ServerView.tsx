@@ -347,8 +347,6 @@ function ManageCard({ inst }: { inst: Instance }) {
   const [name, setName] = useState(inst.name);
   const [memIdx, setMemIdx] = useState(() => Math.max(0, MEMORY_STEPS.findIndex((m) => m >= inst.memory_mb)));
   const [msg, setMsg] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [typed, setTyped] = useState("");
   const stopped = inst.state === "stopped" || inst.state === "crashed" || inst.state === "install_failed";
   const memory = MEMORY_STEPS[memIdx] ?? inst.memory_mb;
   const dirty = name.trim() !== inst.name || memory !== inst.memory_mb;
@@ -364,21 +362,11 @@ function ManageCard({ inst }: { inst: Instance }) {
     }
   }
 
-  async function remove() {
-    try {
-      await call("instances.delete", { instance: inst.id, confirm: true });
-      setDeleting(false);
-      void qc.invalidateQueries({ queryKey: ["instances"] });
-    } catch (e) {
-      setDeleting(false);
-      setMsg({ tone: "error", text: errorText(e) });
-    }
-  }
-
   return (
     <div className="block-card rise space-y-4 p-6 lg:col-span-2" style={{ animationDelay: "120ms" }}>
       <h2 className="font-display text-lg font-semibold">Manage</h2>
-      {!stopped && <p className="text-xs text-muted">Stop the server to rename it, change its memory, or delete it.</p>}
+      {!stopped && <p className="text-xs text-muted">Stop the server to rename it or change its memory.</p>}
+      <p className="text-xs text-faint">To delete this server, open its Settings tab.</p>
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
         <div>
           <label className="label" htmlFor="rename">Name</label>
@@ -403,31 +391,8 @@ function ManageCard({ inst }: { inst: Instance }) {
         <button className="btn btn-primary" disabled={!stopped || !dirty || !name.trim()} onClick={save}>
           Save changes
         </button>
-        <button className="btn btn-danger ml-auto" disabled={!stopped} onClick={() => setDeleting(true)}>
-          Delete server…
-        </button>
       </div>
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
-      {deleting && (
-        <Confirm
-          title={`Delete ${inst.name}?`}
-          danger
-          body={
-            <>
-              <p>The server disappears from the app. Its folder (worlds, backups, everything) is moved to the manager's trash folder, so it can still be recovered by hand.</p>
-              <p>Type the server's name to confirm.</p>
-            </>
-          }
-          confirmLabel="Delete"
-          onClose={() => {
-            setDeleting(false);
-            setTyped("");
-          }}
-          onConfirm={() => typed === inst.name && remove()}
-        >
-          <input className="field" aria-label="Server name" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={inst.name} />
-        </Confirm>
-      )}
     </div>
   );
 }

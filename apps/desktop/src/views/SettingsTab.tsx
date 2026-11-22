@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { call, type Instance } from "../lib/api";
 import { errorText } from "../lib/text";
 import { Notice, Spinner } from "../components/ui";
+import { DeleteServerSection } from "./DeleteServer";
 
 type Kind = { kind: "bool" } | { kind: "int"; min: number; max: number } | { kind: "choice"; options: string[] } | { kind: "text"; max_len: number };
 type SettingDef = { key: string; group: string; label: string; help: string; default: string; warning: [string, string] | null } & Kind;
@@ -66,6 +67,7 @@ export function SettingsTab({ inst }: { inst: Instance }) {
           </div>
         </section>
       ))}
+      <DeleteServerSection inst={inst} />
       <div className="fixed right-10 bottom-6 flex items-center gap-4">
         {result && (
           <div className="max-w-md">

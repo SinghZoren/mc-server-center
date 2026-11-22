@@ -106,14 +106,17 @@ export function Confirm({
   body,
   confirmLabel,
   danger = false,
+  confirmDisabled = false,
   onConfirm,
   onClose,
   children,
 }: {
   title: string;
   body: ReactNode;
-  confirmLabel: string;
+  confirmLabel: ReactNode;
   danger?: boolean;
+  /** Keeps the confirm button disabled, e.g. until the user has typed a name. */
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onClose: () => void;
   children?: ReactNode;
@@ -126,7 +129,7 @@ export function Confirm({
         <button className="btn" onClick={onClose}>
           Cancel
         </button>
-        <button className={`btn ${danger ? "btn-danger" : "btn-primary"}`} onClick={onConfirm}>
+        <button className={`btn ${danger ? "btn-danger" : "btn-primary"}`} disabled={confirmDisabled} onClick={onConfirm}>
           {confirmLabel}
         </button>
       </div>

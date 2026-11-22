@@ -66,8 +66,9 @@ Open the [**Releases**](../../releases/latest) page and pick one file:
 | Windows, no installer | `MCServerCenter-<version>-windows-x64-portable.zip` | Unzip anywhere and run `MC Server Center.exe`. Keep `msmd.exe` in the same folder. |
 | A Linux server (headless) | `MCServerCenter-<version>-linux-x86_64.tar.gz` | See [Running servers on a Linux machine](#running-servers-on-a-linux-machine). |
 
-**"Windows protected your PC"?** The builds are not code-signed yet, so SmartScreen warns about
-any new program from an unknown publisher. Choose **More info → Run anyway**. Every release has a
+**"Windows protected your PC"?** SmartScreen warns about new programs it hasn't seen much yet.
+Releases are being set up for code signing ([code signing policy](docs/CODE_SIGNING.md)); until a
+release is signed and well known, SmartScreen may warn. Choose **More info → Run anyway**. Every release has a
 `SHA256SUMS` file, and you can check a download with
 `Get-FileHash .\MCServerCenter-Setup-*.exe` in PowerShell.
 
@@ -425,6 +426,7 @@ flowchart LR
   - Modrinth searches;
   - the public-IP and outside checks, which run only when you click them;
   - connections to Linux machines you paired yourself.
+  - The full list is in the [code signing policy](docs/CODE_SIGNING.md#privacy).
 - **Local access:** the service listens on a named pipe (Windows) or a Unix socket (Linux) that
   only your user account can open, and it checks the caller's identity.
 - **Remote access** is off by default. When on, it uses mutual TLS 1.3 with pinned certificates.
@@ -561,7 +563,8 @@ Working today:
 Not done yet:
 - **Server types:** Forge and NeoForge servers and modpacks.
 - **Backups:** scheduled, automatic.
-- **Distribution:** code-signed builds and automatic updates.
+- **Distribution:** automatic updates. Code signing through SignPath Foundation is wired up (see
+  [docs/CODE_SIGNING.md](docs/CODE_SIGNING.md)).
 - **Secrets:** storage in Windows Credential Manager. Today they are files readable only by your
   user.
 - **Desktop:** macOS and Linux desktop builds. The Linux *service* is supported.
