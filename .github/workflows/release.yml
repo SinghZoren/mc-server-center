@@ -1,0 +1,187 @@
+# Builds downloadable releases.
+#
+#   * Push a tag like `v0.1.0` (matching the version in Cargo.toml / tauri.conf.json): builds
+#     everything and publishes a GitHub Release with the files below plus SHA256SUMS.
+#   * Run it manually (Actions -> Release -> Run workflow): builds everything and attaches the
+#     files to the workflow run as artifacts, without publishing a release.
+#
+# Files:
+#   MCServerCenter-Setup-<version>-x64.exe           Windows installer (no admin rights needed)
+#   MCServerCenter-<version>-windows-x64-portable.zip  the same app, unzip-and-run
+#   MCServerCenter-<version>-linux-x86_64.tar.gz       headless Linux service + installer
+#
+# The Windows files are not code-signed yet, so Windows SmartScreen will warn on first run.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: Read version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        shell: bash
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          app=$(node -p "require('./apps/desktop/src-tauri/tauri.conf.json').version")
+          if [ "$version" != "$app" ]; then
+            echo "::error::Cargo.toml version ($version) and tauri.conf.json version ($app) differ"
+            exit 1
+          fi
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match version v$version; bump the version first"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  windows:
+    name: Windows app
+    needs: version
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      # rust-toolchain.toml pins the toolchain; rustup installs it on first use.
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/desktop/pnpm-lock.yaml
+
+      - name: Build the service and command-line tool
+        run: cargo build --release --locked -p msmd -p msmctl
+
+      - name: Build the app and installer
+        working-directory: apps/desktop
+        run: |
+          pnpm install --frozen-lockfile
+          node scripts/stage-sidecar.mjs
+          pnpm tauri build --config src-tauri/tauri.release.conf.json
+
+      - name: Collect files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $setup = Get-ChildItem target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          if (-not $setup) { throw "installer not found" }
+          Copy-Item $setup.FullName "dist/MCServerCenter-Setup-$env:VERSION-x64.exe"
+
+          $p = "portable/MCServerCenter"
+          New-Item -ItemType Directory -Force $p | Out-Null
+          Copy-Item target/release/msm-desktop.exe "$p/MC Server Center.exe"
+          Copy-Item target/release/msmd.exe, target/release/msmctl.exe $p
+          Copy-Item LICENSE-MIT, LICENSE-APACHE $p
+          @"
+          MC Server Center $env:VERSION (portable)
+
+          Double-click "MC Server Center.exe". Keep msmd.exe in the same folder: it is the background
+          service that keeps your servers running after you close the window.
+
+          Your servers and settings are stored in %LOCALAPPDATA%\MinecraftServerManager, not in
+          this folder, so you can replace this folder with a newer version at any time.
+
+          msmctl.exe is the optional command-line tool (msmctl help).
+          "@ | Set-Content "$p/README.txt"
+          Compress-Archive -Path $p -DestinationPath "dist/MCServerCenter-$env:VERSION-windows-x64-portable.zip"
+          Get-ChildItem dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+          if-no-files-found: error
+
+  linux:
+    name: Linux service
+    needs: version
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: Build
+        run: cargo build --release --locked -p msmd -p msmctl
+      - name: Package
+        run: |
+          name="MCServerCenter-$VERSION-linux-x86_64"
+          mkdir -p "$name" dist
+          cp target/release/msmd target/release/msmctl "$name/"
+          cp packaging/linux/install.sh packaging/linux/msmd.service packaging/linux/README.md "$name/"
+          cp LICENSE-MIT LICENSE-APACHE "$name/"
+          chmod 0755 "$name/msmd" "$name/msmctl" "$name/install.sh"
+          tar -czf "dist/$name.tar.gz" "$name"
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    if: github.ref_type == 'tag'
+    needs: [version, windows, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat > notes.md <<'EOF'
+          ## Download
+
+          | You have | Download |
+          |---|---|
+          | Windows 10/11 | **MCServerCenter-Setup-…-x64.exe**: run it, then open *MC Server Center* from the Start menu |
+          | Windows, no installer | **…-windows-x64-portable.zip**: unzip, run `MC Server Center.exe` |
+          | A Linux server | **…-linux-x86_64.tar.gz**: see `README.md` inside (`sudo ./install.sh`) |
+
+          These builds are not code-signed yet. Windows SmartScreen may say "Windows protected your PC":
+          choose **More info -> Run anyway**. You can check the files against `SHA256SUMS`.
+
+          Not an official Minecraft product. Not approved by or associated with Mojang or Microsoft.
+          EOF
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "MC Server Center $TAG" \
+            --notes-file notes.md \
+            --generate-notes

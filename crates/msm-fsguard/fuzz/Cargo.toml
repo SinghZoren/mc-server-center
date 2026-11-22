@@ -1,0 +1,19 @@
+[package]
+name = "msm-fsguard-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+msm-fsguard = { path = ".." }
+
+[[bin]]
+name = "relpath"
+path = "fuzz_targets/relpath.rs"
+test = false
+doc = false
+bench = false

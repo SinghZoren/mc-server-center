@@ -1,0 +1,47 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/msm-core",
+    "crates/msm-fsguard",
+    "crates/msm-storage",
+    "crates/msm-api",
+    "crates/msm-transport",
+    "crates/msm-providers",
+    "crates/msm-engine",
+    "apps/msmd",
+    "apps/msmctl",
+    "apps/desktop/src-tauri",
+]
+# Fuzz targets live in crates/*/fuzz and need nightly; they are separate packages.
+exclude = ["crates/msm-fsguard/fuzz"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/SinghZoren/mc-server-center"
+publish = false
+
+[workspace.dependencies]
+msm-core = { path = "crates/msm-core" }
+msm-fsguard = { path = "crates/msm-fsguard" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+ulid = { version = "1", features = ["serde"] }
+proptest = "1"
+tempfile = "3"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+unwrap_used = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

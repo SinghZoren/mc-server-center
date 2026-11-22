@@ -1,0 +1,37 @@
+/target
+**/fuzz/target
+**/fuzz/corpus
+**/fuzz/artifacts
+node_modules/
+*.log
+.env
+.claude/settings.local.json
+apps/desktop/dist/
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/target/
+*.tsbuildinfo
+
+apps/desktop/src-tauri/binaries/
+
+# Internal planning material (kept locally, not published)
+PRD.md
+planning/
+CLAUDE.md
+.claude/
+
+# Unused scaffolding and icon sources
+xtask/
+apps/desktop/src-tauri/icons/icon-source.png
+apps/desktop/src-tauri/icons/make_icon.py
+
+# Editors and OS files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local release output
+dist/
+portable/

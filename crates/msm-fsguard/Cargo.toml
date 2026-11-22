@@ -1,0 +1,25 @@
+[package]
+name = "msm-fsguard"
+description = "Security boundary: validated relative paths and confinement of file access to instance roots."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+msm-core.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+zip = { version = "4", default-features = false, features = ["deflate"] }
+flate2 = "1"
+tar = "0.4"
+
+[dev-dependencies]
+proptest.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

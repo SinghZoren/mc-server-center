@@ -1,0 +1,20 @@
+[package]
+name = "msmctl"
+description = "Command-line client for the MC Server Center service (admin and testing)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+msm-core.workspace = true
+msm-api = { path = "../../crates/msm-api" }
+msm-storage = { path = "../../crates/msm-storage" }
+msm-transport = { path = "../../crates/msm-transport" }
+tokio = { version = "1", features = ["full"] }
+serde_json.workspace = true
+
+[lints]
+workspace = true

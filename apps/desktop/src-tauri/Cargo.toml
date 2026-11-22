@@ -1,0 +1,26 @@
+[package]
+name = "msm-desktop"
+description = "MC Server Center desktop app (Tauri 2)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+msm-core = { path = "../../../crates/msm-core" }
+msm-api = { path = "../../../crates/msm-api" }
+msm-storage = { path = "../../../crates/msm-storage" }
+msm-transport = { path = "../../../crates/msm-transport" }
+msm-fsguard = { path = "../../../crates/msm-fsguard" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "process"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true

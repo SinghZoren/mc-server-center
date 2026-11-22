@@ -1,0 +1,32 @@
+[Unit]
+Description=MC Server Center service (msmd)
+Documentation=https://github.com/SinghZoren/mc-server-center/blob/main/packaging/linux/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=msm
+Group=msm
+# Data lives in /var/lib/msm (msmd reads $STATE_DIRECTORY).
+StateDirectory=msm
+StateDirectoryMode=0700
+ExecStart=/usr/local/bin/msmd serve
+Restart=on-failure
+RestartSec=5
+# Only stop the manager itself on restart/upgrade: each Minecraft server runs in its own
+# runner process and keeps running; the restarted daemon re-attaches to it.
+KillMode=process
+# Hardening (the service needs no privileges).
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

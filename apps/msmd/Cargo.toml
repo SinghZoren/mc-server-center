@@ -1,0 +1,30 @@
+[package]
+name = "msmd"
+description = "MC Server Center background service (daemon)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+msm-core.workspace = true
+msm-fsguard.workspace = true
+msm-api = { path = "../../crates/msm-api" }
+msm-storage = { path = "../../crates/msm-storage" }
+msm-transport = { path = "../../crates/msm-transport" }
+msm-providers = { path = "../../crates/msm-providers" }
+msm-engine = { path = "../../crates/msm-engine" }
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+serde.workspace = true
+serde_json.workspace = true
+toml = "0.9"
+thiserror.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
