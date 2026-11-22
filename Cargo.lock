@@ -2254,7 +2254,7 @@ dependencies = [
 
 [[package]]
 name = "msm-api"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "msm-core",
  "proptest",
@@ -2265,7 +2265,7 @@ dependencies = [
 
 [[package]]
 name = "msm-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "proptest",
  "serde",
@@ -2276,7 +2276,7 @@ dependencies = [
 
 [[package]]
 name = "msm-desktop"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "msm-api",
  "msm-core",
@@ -2292,7 +2292,7 @@ dependencies = [
 
 [[package]]
 name = "msm-engine"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "fs4",
  "hex",
@@ -2316,7 +2316,7 @@ dependencies = [
 
 [[package]]
 name = "msm-fsguard"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "flate2",
  "msm-core",
@@ -2331,7 +2331,7 @@ dependencies = [
 
 [[package]]
 name = "msm-providers"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "futures-util",
  "hex",
@@ -2352,7 +2352,7 @@ dependencies = [
 
 [[package]]
 name = "msm-storage"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "msm-core",
  "rusqlite",
@@ -2363,7 +2363,7 @@ dependencies = [
 
 [[package]]
 name = "msm-transport"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hex",
  "hmac",
@@ -2383,7 +2383,7 @@ dependencies = [
 
 [[package]]
 name = "msmctl"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "msm-api",
  "msm-core",
@@ -2395,7 +2395,7 @@ dependencies = [
 
 [[package]]
 name = "msmd"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "hex",
  "msm-api",
