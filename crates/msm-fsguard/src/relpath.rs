@@ -357,7 +357,12 @@ mod tests {
         #[test]
         fn parent_components_always_rejected(prefix in "[a-z]{0,8}", suffix in "[a-z]{0,8}", sep in r"[/\\]") {
             let input = if prefix.is_empty() { format!("..{sep}{suffix}") } else { format!("{prefix}{sep}..{sep}{suffix}") };
-            prop_assert_eq!(RelPath::parse(&input), Err(PathError::ParentTraversal));
+            // Rejected; usually as traversal, but a reserved prefix ("nul", "con") may be caught first.
+            let result = RelPath::parse(&input);
+            prop_assert!(result.is_err(), "{input:?} was accepted");
+            if !matches!(result, Err(PathError::ReservedName(_))) {
+                prop_assert_eq!(result, Err(PathError::ParentTraversal));
+            }
         }
 
         /// Arbitrary unicode never panics.
