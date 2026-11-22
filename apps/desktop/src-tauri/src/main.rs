@@ -110,7 +110,10 @@ fn quit_everything(app: &AppHandle) {
                 link.request("system.info".into(), Value::Null),
             )
             .await;
-            pid = info.ok().and_then(Result::ok).and_then(|v| v["pid"].as_u64());
+            pid = info
+                .ok()
+                .and_then(Result::ok)
+                .and_then(|v| v["pid"].as_u64());
             if pid.is_some() {
                 // Waits while servers save and stop (each force-ended after ~50 s).
                 let _ = tokio::time::timeout(
@@ -167,13 +170,7 @@ fn show_main(app: &AppHandle) {
 fn build_tray(app: &tauri::App) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open MC Server Center", true, None::<&str>)?;
     let stop_all = MenuItem::with_id(app, "stop_all", "Stop all servers", true, None::<&str>)?;
-    let quit = MenuItem::with_id(
-        app,
-        "quit",
-        "Quit (stops servers)",
-        true,
-        None::<&str>,
-    )?;
+    let quit = MenuItem::with_id(app, "quit", "Quit (stops servers)", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&open, &sep, &stop_all, &quit])?;
     let mut tray = TrayIconBuilder::with_id("main")

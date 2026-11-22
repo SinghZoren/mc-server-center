@@ -1235,7 +1235,10 @@ impl Daemon {
                         let me = self.clone();
                         stops.spawn(async move {
                             let _ = me.stop(inst.clone(), DEFAULT_STOP_TIMEOUT).await;
-                            if tokio::time::timeout(Duration::from_secs(50), proc.wait_exit()).await.is_err() {
+                            if tokio::time::timeout(Duration::from_secs(50), proc.wait_exit())
+                                .await
+                                .is_err()
+                            {
                                 let _ = me.kill(inst).await;
                             }
                         });
